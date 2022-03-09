@@ -204,18 +204,6 @@ void setup () {
   power_timer2_disable();
   //DON'T mess with timer0 unless you know what you are doing!
 
-// Digital input buffers can draw a relatively high amount of current if the input is close to half-Vcc
-// Turning the digital buffer off is available only for analog pins. When you turn the ADC clock off 
-// (when you set PRADC bit in PRR register) the DIDR0 register is no longer accessible.
-  //PORTC &= B11000000; // A5..A0 pullups OFF (I2C will take control of A5/4 at wire.begin)
-  //DDRC &= B11000000;  // unused A5..A0 set as inputs
-  //bitSet (DIDR0, ADC0D);  // disable digital buffer on A0
-  //bitSet (DIDR0, ADC1D);  // disable digital buffer on A1
-  //bitSet (DIDR0, ADC2D);  // disable digital buffer on A2 - because we have repurposed this SCREW TERMINAL port for I2C A4 DATA
-  //bitSet (DIDR0, ADC3D);  // disable digital buffer on A3 - because we have repurposed ST port for I2C A5 SCLOCK
-//DIDR0 = 0x0F;//  disables the digital inputs on analog 0..3 (NOT analog 4&5 being used by I2C!)   
-  //Once disabled, a digitalRead on those pins will always return zero.
-
   unusedPins2InputPullup();
     
   Wire.begin();  // enables internal 30-50k pull-up resistors on SDA & SCL by default
