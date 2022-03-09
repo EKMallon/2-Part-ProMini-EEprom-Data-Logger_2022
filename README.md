@@ -4,6 +4,7 @@
 <img   align="right" width="400" src="https://github.com/EKMallon/2-Part-ProMini-EEprom-Data-Logger_2022/blob/main/images/2-PartEEpromLogger_CavePearlProject_2022.jpg">
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from Edward Mallon & Dr. Patricia Beddows at the Cave Pearl Project. The idea is to provide a starting point for student projects in environmental monitoring courses and thesis level research.
 
+
 This 'low power' 2-module iteration runs the logger from a CR2032 coin cell and uses  EEprom memory to store sensor readings. This necessarily involves several power optimization steps which add complexity to the base code as compared to previous  versions, but hopefully everyone can read through the code and understand what is happening from the comments. 
 
 Data download & logger control are managed  through the IDE's serial monitor window at 250000 baud. 
