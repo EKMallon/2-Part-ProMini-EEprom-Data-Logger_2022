@@ -16,5 +16,7 @@ Note that all the readings are initially buffered in opdDataBuffer[16] & sensorD
 The most important rule to follow when adding new sensors is that the buffer arrays can only handle byte additions of 1, 2, 4, or 8
 Odd byte quantities other than one and you end up with page boundary issues in the EEprom (as page sizes are always powers of 2)
 
+---
+
 Note: This script will still run on the 3-module "Modules & Jumper Wires"  loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/18/2/530 
 and provides a 'no SD card' method of extending lifespan on the 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/  where multiple I2C eeproms can be added easily via the breadboard(s)
