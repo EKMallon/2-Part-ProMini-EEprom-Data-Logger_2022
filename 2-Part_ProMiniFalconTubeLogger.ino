@@ -1153,26 +1153,11 @@ if (midnightRollover){
 ISR(TIMER2_OVF_vect){           //must be here or you hang the system at the first T2 overflow...
 }
 
-/*
-// Eeprom read is ~4 clock cycles: https://forum.arduino.cc/index.php?topic=191889.0
-void Read_i2c_eeprom_array( uint8_t deviceAddress, uint16_t registerAddress_16bit,byte *arrayPointer,uint8_t numOfBytes)
-{ 
-  if (numOfBytes>30) { numOfBytes=30;} // I2C wire library limits us to 30 bytes no matter how big the source array is
-  Wire.beginTransmission(deviceAddress);
-  Wire.write((byte)(registerAddress_16bit >> 8));   // send the MSB of the address
-  Wire.write((byte)(registerAddress_16bit & 0xFF)); // send the LSB of the address
-  Wire.endTransmission();
-  Wire.requestFrom((uint8_t)deviceAddress,numOfBytes);
-    for (int i=0; i<numOfBytes; i++) {
-    arrayPointer[i] = Wire.read();
-    }
-}
-*/
 //================================
 #ifdef DigitalPinReadAnalogTherm
 //=================================
 // Based on Nick Gammon's frequency counter at https://www.gammon.com.au/forum/?id=11504
-// Adapted by Edward Mallon for ratiometric reading of resistive sensors with ICU on D8. For a detailed explaination: 
+// Adapted by Edward Mallon for ratiometric reading of resistive sensors with ICU on D8. For a details see: 
 // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
 
 //=========================================================================================
