@@ -778,7 +778,7 @@ Serial.print(F("UnixTime,"));
 
     //unixtime index value stored in penultimate four bytes of internal eeprom
     EEPROM.get(1016,utime.EE_byteArray);           //note bytearray unioned w utime.cyleTimeStart
-    uint32_t unix_timeStamp = utime.cyleTimeStart; // ULong to 4,294,967,295
+    uint32_t unix_timeStamp; // ULong to 4,294,967,295
     int32_t RecordCounter = 0;
     
 for (uint16_t i = 0; i < (sensorEEbytesOfStorage-sensorBytesPerRecord); i+=sensorBytesPerRecord) { //increment by # of bytes PER RECORD in eeprom
@@ -850,36 +850,35 @@ if (convertDataFlag){  //UnixTime is 'reconstructed' from start time & record nu
 //=================================================================================
 void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when midnight rollover flags true
 //=================================================================================
-      
+   
+   uint32_t unix_timeStamp;
    uint32_t RecordCounter = 0; // uint16_t good to 65535 - only need uint32_t for eeproms larger than 64k
    Serial.println(F("UnixTime,LOWbat,RTCtemp")); //change this to suit the data save in oncePerDayEvents()
    
-   #ifdef BatteryReadingEveryCycle  //using the same TimeStamp index as the sensor records
+if (BatteryReadingEveryCycle){  //using the same TimeStamp index as the sensor records
    EEPROM.get(1016,utime.EE_byteArray);
-   #else
+}else{
    //the normal onceperday 'midnight' time index value stored in 2nd to last four bytes of the int.EEprom
    EEPROM.get(1020,utime.EE_byteArray); // filling utime.EE_byteArray populates utime.cyleTimeStart via union
-   #endif
+}
 
-   uint32_t unix_timeStamp = utime.cyleTimeStart;
   
    for (uint16_t i = (opdEEbytesOfStorage-1) ; i >= opdBytesPerRecord; i-=opdBytesPerRecord) { //this loop increments backwards 
 
        integerBuffer = i2c_eeprom_read_byte(opdEEpromI2Caddr,i); // byte will not be zero with battery reads above 1700mv
        if(integerBuffer==0 & convertDataFlag){break;}   //stops sending if zero is found
 
-     #ifdef BatteryReadingEveryCycle  //then use the same TimeStamp calc as the sensor records
-     
-     if (convertDataFlag){                 //UnixTime is 'reconstructed' from start time & record number 
+if (convertDataFlag){           //UnixTime is 'reconstructed' from start time & record number 
+  
+    if (BatteryReadingEveryCycle){   //then use the same TimeStamp calc as the sensor records
        unix_timeStamp = utime.cyleTimeStart + (uint32_t)(60UL*RecordCounter*SampleIntervalMinutes); //used if you are using more than one byte per record        }
-       Serial.print(unix_timeStamp);Serial.print(",");
-     }
-
-     #else       //86400 seconds is time increment for once per day events
-     unix_timeStamp = utime.cyleTimeStart + (86400UL * RecordCounter);  
-     Serial.print(unix_timeStamp);Serial.print(","); //UL forces long calc
-     
-     #endif 
+    }else{
+        //but 1 day = 86400 seconds is the normal time increment for once per day record
+       unix_timeStamp = utime.cyleTimeStart + (86400UL * RecordCounter);     
+    } //if(BatteryReadingEveryCycle)
+    
+       Serial.print(unix_timeStamp);Serial.print(","); //UL forces long calc
+} //if (convertDataFlag) 
      
      if(convertDataFlag){  //then restore LOWEST Battery value from one byte encoded in eeprom
        integerBuffer =(integerBuffer*16)+1700; //4096mv range at 16mv resolution
