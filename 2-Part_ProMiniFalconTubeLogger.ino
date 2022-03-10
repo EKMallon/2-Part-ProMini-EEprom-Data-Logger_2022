@@ -851,7 +851,6 @@ if (convertDataFlag){  //UnixTime is 'reconstructed' from start time & record nu
 void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when midnight rollover flags true
 //=================================================================================
       
-   uint32_t unix_timeStamp;    // to 4,294,967,295 
    uint32_t RecordCounter = 0; // uint16_t good to 65535 - only need uint32_t for eeproms larger than 64k
    Serial.println(F("UnixTime,LOWbat,RTCtemp")); //change this to suit the data save in oncePerDayEvents()
    
@@ -862,6 +861,8 @@ void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when mi
    EEPROM.get(1020,utime.EE_byteArray); // filling utime.EE_byteArray populates utime.cyleTimeStart via union
    #endif
 
+   uint32_t unix_timeStamp = utime.cyleTimeStart;
+  
    for (uint16_t i = (opdEEbytesOfStorage-1) ; i >= opdBytesPerRecord; i-=opdBytesPerRecord) { //this loop increments backwards 
 
        integerBuffer = i2c_eeprom_read_byte(opdEEpromI2Caddr,i); // byte will not be zero with battery reads above 1700mv
