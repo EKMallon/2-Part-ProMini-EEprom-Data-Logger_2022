@@ -76,8 +76,8 @@ const char NTCcal[] PROGMEM = "No cal for this unit yet...";
 //change the eeprom settings manually to match your hardware configuration:
 //once-per-day readings are just lowest battery reading per day & RTC temp at midnight
 #define opdEEpromI2Caddr 0x57       // default: 0x57 4096 4k EEprom on RTC module
-#define opdEEbytesOfStorage 4096   // AT24c256 YL-90 (red module)32768@0x50 // OR // 64k AT24c512(via chip swap on RTC)65536@0x57
-#define opdBytesPerRecord 2         // Change this manually if you edit #of bytes stored in opdDataBuffer (at midnight rollover)
+#define opdEEbytesOfStorage 4096    // AT24c256 YL-90 (red module)32768@0x50 // OR // 64k AT24c512(via chip swap on RTC)65536@0x57
+//#define opdBytesPerRecord         // Change this manually if you edit #of bytes stored in opdDataBuffer (at midnight rollover)
 uint8_t opdDataBuffer[16];          // [16] is max unless you increase the I2C buffers
 int8_t opdArrayPointer= sizeof(opdDataBuffer); // opd Pointer increments backwards & must be able to hold negative value without overflow
 uint32_t opdEEprMemPointer = opdEEbytesOfStorage - sizeof(opdDataBuffer); //increments backwards
@@ -105,6 +105,11 @@ uint8_t sensorArrayPointer = 0;
    #define sensorBytesPerRecord 2
 #endif
 
+#if defined(RTC_ONLY)
+  #define opdBytesPerRecord 1         // Change this manually if you edit #of bytes stored in opdDataBuffer (at midnight rollover)
+#else
+  #define opdBytesPerRecord 2 
+#endif
 
 uint16_t systemShutdownVoltage = 2750; // MUST be > BOD default of 2700mv (also EEprom limit)
 byte default_ADCSRA,default_ADMUX;     // stores default register settings
@@ -649,11 +654,13 @@ if (midnightRollover) {    //normally set true only on the midnight hour rollove
   if(integerBuffer<1){integerBuffer=1;}          // to preserve END of DATA check
   opdDataBuffer[opdArrayPointer] = integerBuffer;
 
+#ifndef RTC_ONLY
   opdArrayPointer=opdArrayPointer-1;
   integerBuffer = round((rtc_TEMP_Raw+40)/4);    // this 1-byte encoding is restricted to temp. range 51.5 to -12.25 degC
   if(integerBuffer>255){integerBuffer=255;}      // temps above 51.5 clipped
   if(integerBuffer<0){integerBuffer=0;}          // sets lower cutoff to -12.25C!
   opdDataBuffer[opdArrayPointer] = integerBuffer;
+#endif
 
 if (opdArrayPointer ==0) {    // the Buffer is full - so transfer that data to the eeprom
 
@@ -878,9 +885,10 @@ void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when mi
        }
      Serial.print(integerBuffer);
 
-     integerBuffer=i2c_eeprom_read_byte(opdEEpromI2Caddr,i-1);
+#ifndef RTC_ONLY      //no need for RTC temp in opd record for RTC only config
 
-//if you are also saving RTC temp in OPD record       
+    integerBuffer=i2c_eeprom_read_byte(opdEEpromI2Caddr,i-1);
+         
    if(convertDataFlag){  // convert  to human readable temp
      // restore our 'raw' RTCtemp data format from single bytes stored in EEprom to tempC
      // NOTE: this 1-byte encoding method FAILS above 51.5 degrees and below -12.25C degrees celcius
@@ -889,6 +897,7 @@ void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when mi
      }else{ // we are printing RAW data as store in eeprom
      Serial.print(",");Serial.print(integerBuffer); //the raw RTC temp data from the eeprom
      } 
+#endif
      
      RecordCounter++;Serial.println();Serial.flush();
   }        // terminator: for (uint32_t i = (opdEEbytesOfStorage-1) ; i >= 0; i=i-2)
