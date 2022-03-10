@@ -62,7 +62,7 @@ boolean BatteryReadingEveryCycle = true;  // default: false to save LOWbattery r
 
 //uncomment the defines to match your attached sensors:
 //=====================================================
-#define RTC_ONLY
+#define RTC_ONLY                      // Records a 0.25C resolution temperature record using the RTC's internal temperature sensor
 //#define BMP280_ON                   // provided here as 'type example' to show steps required to add other sensors to your logger
 //#define DigitalPinReadAnalogTherm   // can be combined with DigitalPinReadCDScell
 //#define DigitalPinReadCDScell       // CDS cell support is 'embedded' inside readNTCthermistor() so DigitalPinReadAnalogTherm must also be enabled
