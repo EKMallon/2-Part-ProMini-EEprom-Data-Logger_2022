@@ -55,7 +55,7 @@ const char deploymentDetails[] PROGMEM = "RTC ONLY,1126400L,1.098v,1.9uA";
 // Make sure your sensor readings don't take longer than your sample interval
 // If you pass your alarm time you will have to wait 24hours for the next sensor reading
 
-boolean BatteryReadingEveryCycle = true;  // default: false to save LOWbattery reading only once per day at midnight (when battery is cold)
+boolean BatteryReadingEveryCycle = false;  // default: false to save LOWbattery reading only once per day at midnight (when battery is cold)
 // set BatteryReadingEveryCycle=true for frequent reading of battery voltage during debug & testing
 // this forces the 'Once per Day' data to be saved at EVERY SampleInterval & checks coincell battery each time opdDataBuffer is transferred to EEprom
 // the time between these 'forced' battery checks = [sizeof(opdDataBuffer)/opdBytesPerRecord]*SampleInterval
