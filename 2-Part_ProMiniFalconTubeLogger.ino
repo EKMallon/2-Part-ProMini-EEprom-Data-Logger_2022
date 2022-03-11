@@ -166,14 +166,14 @@ float bmp280_temp,  bmp280_pressure,  bmp280_altitude;    // 3 float variables f
 #endif  //BMP280_ON       // ================================================
 
 #ifdef DigitalPinReadAnalogTherm   //========================================
-  #define referencePullupResistance 10000 //an ARBITRARY value (regardless of the actual 10k reference value) simply shifts the thermistor calibration!
-  uint16_t resistanceof10kNTC;     // max of 65535 limits our ability to measure 10kNTC resistance below zero C
+  #define referencePullupResistance 10000L //an ARBITRARY value (regardless of the actual 10k reference value) simply shifts the thermistor calibration!
+  uint32_t resistanceof10kNTC;
   volatile boolean triggered;
   volatile uint16_t timer1CounterValue;
 #endif
 
 #ifdef DigitalPinReadCDScell    //============================================
-  uint16_t resistanceofCDScell; // 65535 limits so we test the value of the CDScell with discharge before measuring
+  uint32_t resistanceofCDScell; 
 #endif
 
 //======================================================================================================================
