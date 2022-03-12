@@ -414,35 +414,36 @@ Serial.println(F("Starting the Data logger...")); Serial.flush();
   // uses location at the END of memory to leave first few bytes for other information (later)
   
 #ifdef ECHO_TO_SERIAL                     //no waiting for time sync delay if ECHO is on
-  utime.cyleTimeStart = timeCalcVariable; //= RTC_DS3231_unixtime();
-  EEPROM.put(1016,utime.EE_byteArray);    // save this sensor reading time-index value to intEEprom location 0 // 3msec blocking
+  utime.cyleTimeStart = timeCalcVariable;
+  EEPROM.put(1016,utime.EE_byteArray);    // save this 4-byte UnixTime index {via union} to intEEprom location 0
+                                          // this blocks processor for 4x3msec = 12 milliseconds
   Serial.println(F("Sync delay disabled when ECHO_TO_SERIAL enabled"));
   Serial.println();Serial.flush();        // In debug mode you don't want to wait for a 5-30 min startup
-  
+
 #else   //sleep logger till time is sync'd with 1st sampling interval
 
-  int syncdelay=1; //default 1minute delay if sample interval seconds being used
+  int syncdelay=1;
   Alarmday = t_day;Alarmhour = t_hour;Alarmminute = t_minute;Alarmsecond = 0;
-  if(SampleIntervalMinutes!=0){
-  syncdelay=Alarmminute % SampleIntervalMinutes;  // 7 % 10 = 7 because 7 / 10 < 1, e.g. 10 does not fit even once in seven. So the entire value of 7 becomes the remainder.
-  syncdelay=SampleIntervalMinutes-syncdelay;      // when SampleIntervalMinutes is 1, syncdelay is 1, other cases variable
-  }
+  syncdelay = Alarmminute % SampleIntervalMinutes;  // 7 % 10 = 7 because 7 / 10 < 1, e.g. 10 does not fit even once in seven. So the entire value of 7 becomes the remainder.
+  syncdelay = SampleIntervalMinutes-syncdelay;
+    
   Alarmminute = Alarmminute + syncdelay;
-  if (Alarmminute > 59) {                // check for roll-over
-     Alarmminute = 0; Alarmhour = Alarmhour + 1; 
+  if (Alarmminute > 59) {                     // check for roll-over
+     Alarmminute = SampleIntervalMinutes; Alarmhour = Alarmhour + 1; 
+     syncdelay = (60 - t_minute)+ SampleIntervalMinutes; //for (60UL*syncdelay) calc
         if (Alarmhour > 23) { Alarmhour = 0;} // check for roll-over
   }
-  RTC_DS3231_setA1Time(Alarmday,Alarmhour,Alarmminute,Alarmsecond,0b00001000,false,false,false);   //or RTC.setAlarm1Simple(Alarmhour, Alarmminute);
+  
+  RTC_DS3231_setAlarm1Simple(Alarmhour, Alarmminute);
   RTC_DS3231_turnOnAlarm(1);
 
-  utime.cyleTimeStart = timeCalcVariable +(60*syncdelay); //previous utime reading plus how many seconds you waited to sync
+  utime.cyleTimeStart = timeCalcVariable +(60UL*syncdelay); //previous utime reading plus how many seconds you waited to sync
   EEPROM.put(1016,utime.EE_byteArray);  // save this 4-byte sensor read UnixTime index {via union} to intEEprom location 0
 
   Serial.println(F("RED d13 LED will now flash slowly until the 1st sensor read is taken."));
-  Serial.flush();
   Serial.println(F("Disconnect from the UART now - NO additional messages will be sent."));
-  Serial.flush();
-  power_usart0_disable(); //~40uA
+  Serial.flush(); 
+  power_usart0_disable();
 
    noInterrupts ();         // make sure we don't get interrupted before we sleep
    bitSet(EIFR,INTF0);      // clear flag for interrupt 0 (D2) see https://gammon.com.au/interrupts
@@ -451,13 +452,14 @@ Serial.println(F("Starting the Data logger...")); Serial.flush();
    interrupts ();           // interrupts allowed now
    rtc_INT0_Flag=false;
      do{
-     PORTB  = PORTB ^ 0b00100000;    // toggles D13 LED pullup //~50uA to light led through pullup resistor
+     PORTB  = PORTB ^ 0b00100000;    // toggles D13 LED pullup // ~50uA to light led through pullup resistor
      LowPower.powerDown(SLEEP_1S, ADC_ON, BOD_OFF);
      }while(!rtc_INT0_Flag);         // flag only becomes true if RTC alarm causes D2's ISR rtcAlarmTrigger to run
    
   //detachInterrupt(0); done in the interrupt
-  RTC_DS3231_turnOffBothAlarms();
-#endif  //#ifdef ECHO_TO_SERIAL 
+  RTC_DS3231_turnOffBothAlarms(); //resets rtc_INT0_Flag=false;
+
+#endif // #ifdef ECHO_TO_SERIAL
 
 LowestBattery =5764;                 //1st readbattery in setup is often low because refcap not fully charged
 currentBatteryRead = readBattery();
