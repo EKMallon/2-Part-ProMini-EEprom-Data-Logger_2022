@@ -81,34 +81,30 @@ const char NTCcal[] PROGMEM = "No cal for this unit yet...";
 uint8_t opdDataBuffer[16];          // [16] is max unless you increase the I2C buffers
 int8_t opdArrayPointer= sizeof(opdDataBuffer); // opd Pointer increments backwards & must be able to hold negative value without overflow
 uint32_t opdEEprMemPointer = opdEEbytesOfStorage - sizeof(opdDataBuffer); //increments backwards
+uint8_t opdBytesPerRecord =1;       // default for RTC_ONLY
+
+#ifndef RTC_ONLY
+opdBytesPerRecord =2;               // other sensor cofigs save battery & RTC
+#endif
 
 //for sensor readings // these can be the same as the OPD eeprom
 #define sensorEEpromI2Caddr 0x57    //as the two bufferes are transfered into eeprom memory from 'opposite ends'
 #define sensorEEbytesOfStorage 4096
 uint8_t sensorDataBuffer[16];
 uint8_t sensorArrayPointer = 0;
-
-#ifdef RTC_ONLY
-  #define sensorBytesPerRecord 1
-#endif
+uint8_t sensorBytesPerRecord =1;    // default for RTC_ONLY
 
 #if defined(BMP280_ON)
-  #define sensorBytesPerRecord 4
-#endif
-
-#if defined(DigitalPinReadAnalogTherm) && defined(DigitalPinReadCDScell)
-  #define sensorBytesPerRecord 4
+  sensorBytesPerRecord = 4;
 #endif
 
 // when reading ONLY the NTC but NOT the CDS cell:
 #if defined(DigitalPinReadAnalogTherm) && !defined(DigitalPinReadCDScell)
-   #define sensorBytesPerRecord 2
+   sensorBytesPerRecord = 2;
 #endif
 
-#if defined(RTC_ONLY)
-  #define opdBytesPerRecord 1         // Change this manually if you edit #of bytes stored in opdDataBuffer (at midnight rollover)
-#else
-  #define opdBytesPerRecord 2 
+#if defined(DigitalPinReadAnalogTherm) && defined(DigitalPinReadCDScell)
+  sensorBytesPerRecord = 4;
 #endif
 
 uint16_t systemShutdownVoltage = 2750; // MUST be > BOD default of 2700mv (also EEprom limit)
