@@ -59,6 +59,8 @@ boolean BatteryReadingEveryCycle = false;  // default: false to save LOWbattery 
 // set BatteryReadingEveryCycle=true for frequent reading of battery voltage during debug & testing
 // this forces the 'Once per Day' data to be saved at EVERY SampleInterval & checks coincell battery each time opdDataBuffer is transferred to EEprom
 // the time between these 'forced' battery checks = [sizeof(opdDataBuffer)/opdBytesPerRecord]*SampleInterval
+// NOTE: the current implementation of BatteryReadingEveryCycle doubles memory usage even though readings only happen 1/16 as often as sensor reads
+// I will be posting a fix for this issue after the run tests prove out.
 
 //uncomment the defines to match your attached sensors:
 //=====================================================
