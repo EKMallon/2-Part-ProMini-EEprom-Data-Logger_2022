@@ -1,10 +1,5 @@
-// Cave Pearl Project 2-Part logger code by Edward Mallon ===========
 
-// The build tutorial for this logger can be found at:
-// https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
-
-/*
-This program is supports of an ongoing series of  DIY 'Classroom Logger' tutorials 
+/* This program is supports of an ongoing series of  DIY 'Classroom Logger' tutorials 
 from the Cave Pearl Project. The idea is to provide a starting point for self-built 
 student projects in environmental monitoring courses.
 
@@ -42,28 +37,26 @@ loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/1
 // eg: "RTC ONLY,1123875L,1.098v,1.9uA";
 // "1127315L,NTC 64k65536@0x57,siTHERMcalibration,1.101v,1.46uA,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGBledA0-3";
 
-const char deploymentDetails[] PROGMEM = "RTC ONLY,1126400L,1.098v,1.9uA";
-#define InternalReferenceConstant 1126400L //1126400L = default = 1100mV * 1024 
+const char deploymentDetails[] PROGMEM = "RTC ONLY,1123875L,1.098v,1.9uA";
+#define InternalReferenceConstant 1123875L //1126400L = default = 1100mV * 1024 
 // use a DVM to read the actual rail voltage & add or subtract 400 from the constant 
 // to raise/lower calculated output from readBattery() by ~1 millivolt
 
-//#define ECHO_TO_SERIAL  // DO NOT ENABLE ECHO_TO_SERIAL during battery powered logger operation or system wastes a lot of power waiting for a serial response that never arrives
-                        // It prints readings to screen for USB tethered debugging & also starts the run with no sample interval sync delay
+//#define ECHO_TO_SERIAL  // prints readings to screen for USB tethered debugging & also starts the run with no sample interval sync delay
+// DO NOT ENABLE ECHO_TO_SERIAL during battery powered logger operation or system wastes a lot of power waiting for a serial response that never arrives
 
 #define SampleIntervalMinutes 1   
-// Allowed values: 1,2,3,5,10,15,20 or 30, - a number equally into 60!
+// Allowed values: 1,2,3,5,10,15,20 or 30, - a number that divides equally into 60!
 // Make sure your sensor readings don't take longer than your sample interval
 // If you pass your alarm time you will have to wait 24hours for the next sensor reading
 
-boolean BatteryReadingEveryCycle = false;  // default: false to save LOWbattery reading only once per day at midnight (when battery is cold)
-// set BatteryReadingEveryCycle=true for frequent reading of battery voltage during debug & testing
+boolean BatteryReadingEveryCycle = true;  // default:false to save LOWbattery reading only once per day at midnight (when battery is cold)
+// set BatteryReadingEveryCycle=true for frequent reading of battery voltage during debug & testing - each reading uses 1-byte of eeprom storage
 // this forces the 'Once per Day' data to be saved at EVERY SampleInterval & checks coincell battery each time opdDataBuffer is transferred to EEprom
 // the time between these 'forced' battery checks = [sizeof(opdDataBuffer)/opdBytesPerRecord]*SampleInterval
-// NOTE: the current implementation of BatteryReadingEveryCycle doubles memory usage even though readings only happen 1/16 as often as sensor reads
-// I will be posting a fix for this issue after the run tests prove out.
 
-//uncomment the defines to match your attached sensors:
-//=====================================================
+//uncomment ONLY the defines that match your attached sensors:
+//============================================================
 #define RTC_ONLY                      // Records a 0.25C resolution temperature record using the RTC's internal temperature sensor
 //#define BMP280_ON                   // provided here as 'type example' to show steps required to add other sensors to your logger
 //#define DigitalPinReadAnalogTherm   // can be combined with DigitalPinReadCDScell
@@ -71,7 +64,7 @@ boolean BatteryReadingEveryCycle = false;  // default: false to save LOWbattery 
 
 #ifdef DigitalPinReadAnalogTherm
 const char NTCcal[] PROGMEM = "No cal for this unit yet...";
- // usually something like this after calibration      (and yes, the RTC temp can be calibrated too!)
+ // usually something like this after calibration (and yes, the RTC temp can be calibrated too!)
  // const char NTCcal[] PROGMEM = "1127315L,Cal202202:,A=,0.001246979,B=,0.000216248,C=,0.0000001537444523,R(25°C)=9834.81Ω,β=3850.83K,RTCy=0.9744x -0.4904";
 #endif
 
@@ -79,14 +72,13 @@ const char NTCcal[] PROGMEM = "No cal for this unit yet...";
 //once-per-day readings are just lowest battery reading per day & RTC temp at midnight
 #define opdEEpromI2Caddr 0x57       // default: 0x57 4096 4k EEprom on RTC module
 #define opdEEbytesOfStorage 4096    // AT24c256 YL-90 (red module)32768@0x50 // OR // 64k AT24c512(via chip swap on RTC)65536@0x57
-//#define opdBytesPerRecord         // Change this manually if you edit #of bytes stored in opdDataBuffer (at midnight rollover)
 uint8_t opdDataBuffer[16];          // [16] is max unless you increase the I2C buffers
 int8_t opdArrayPointer= sizeof(opdDataBuffer); // opd Pointer increments backwards & must be able to hold negative value without overflow
 uint32_t opdEEprMemPointer = opdEEbytesOfStorage - sizeof(opdDataBuffer); //increments backwards
-uint8_t opdBytesPerRecord =1;       // default for RTC_ONLY
-
-#ifndef RTC_ONLY
-opdBytesPerRecord =2;               // other sensor cofigs save battery & RTC
+#ifdef RTC_ONLY
+uint8_t opdBytesPerRecord = 1;       // default for RTC_ONLY
+#else
+uint8_t opdBytesPerRecord = 2;       // other sensor cofigs save battery AND RTC
 #endif
 
 //for sensor readings // these can be the same as the OPD eeprom
@@ -94,21 +86,21 @@ opdBytesPerRecord =2;               // other sensor cofigs save battery & RTC
 #define sensorEEbytesOfStorage 4096
 uint8_t sensorDataBuffer[16];
 uint8_t sensorArrayPointer = 0;
+
+#ifdef RTC_ONLY
 uint8_t sensorBytesPerRecord =1;    // default for RTC_ONLY
-
+#endif
 #if defined(BMP280_ON)
-  sensorBytesPerRecord = 4;
+uint8_t sensorBytesPerRecord = 4;
 #endif
-
-// when reading ONLY the NTC but NOT the CDS cell:
-#if defined(DigitalPinReadAnalogTherm) && !defined(DigitalPinReadCDScell)
-   sensorBytesPerRecord = 2;
+#if defined(DigitalPinReadAnalogTherm) && !defined(DigitalPinReadCDScell)  // when reading ONLY the NTC but NOT the CDS cell:
+uint8_t sensorBytesPerRecord = 2;
 #endif
-
 #if defined(DigitalPinReadAnalogTherm) && defined(DigitalPinReadCDScell)
-  sensorBytesPerRecord = 4;
+uint8_t sensorBytesPerRecord = 4;
 #endif
 
+boolean newBatteryReadingReady = false;
 uint16_t systemShutdownVoltage = 2750; // MUST be > BOD default of 2700mv (also EEprom limit)
 byte default_ADCSRA,default_ADMUX;     // stores default register settings
 byte set_ADCSRA, set_ADMUX;            // custom settings for readbattery() via 1.1 internal band gap reference
@@ -165,13 +157,13 @@ float bmp280_temp,  bmp280_pressure,  bmp280_altitude;    // 3 float variables f
 
 #ifdef DigitalPinReadAnalogTherm   //========================================
   #define referencePullupResistance 10000L //an ARBITRARY value (regardless of the actual 10k reference value) simply shifts the thermistor calibration!
-  uint32_t resistanceof10kNTC;
+  uint32_t resistanceof10kNTC;     // max of 65535 limits our ability to measure 10kNTC resistance below zero C
   volatile boolean triggered;
   volatile uint16_t timer1CounterValue;
 #endif
 
 #ifdef DigitalPinReadCDScell    //============================================
-  uint32_t resistanceofCDScell; 
+  uint32_t resistanceofCDScell; // 65535 limits so we test the value of the CDScell with discharge before measuring
 #endif
 
 //======================================================================================================================
@@ -206,6 +198,18 @@ void setup () {
   power_timer1_disable();
   power_timer2_disable();
   //DON'T mess with timer0 unless you know what you are doing!
+
+// Digital input buffers can draw a relatively high amount of current if the input is close to half-Vcc
+// Turning the digital buffer off is available only for analog pins. When you turn the ADC clock off 
+// (when you set PRADC bit in PRR register) the DIDR0 register is no longer accessible.
+  //PORTC &= B11000000; // A5..A0 pullups OFF (I2C will take control of A5/4 at wire.begin)
+  //DDRC &= B11000000;  // unused A5..A0 set as inputs
+  //bitSet (DIDR0, ADC0D);  // disable digital buffer on A0
+  //bitSet (DIDR0, ADC1D);  // disable digital buffer on A1
+  //bitSet (DIDR0, ADC2D);  // disable digital buffer on A2 - because we have repurposed this SCREW TERMINAL port for I2C A4 DATA
+  //bitSet (DIDR0, ADC3D);  // disable digital buffer on A3 - because we have repurposed ST port for I2C A5 SCLOCK
+//DIDR0 = 0x0F;//  disables the digital inputs on analog 0..3 (NOT analog 4&5 being used by I2C!)   
+  //Once disabled, a digitalRead on those pins will always return zero.
 
   unusedPins2InputPullup();
     
@@ -305,7 +309,6 @@ error(); //shut down the logger
 } else {
 RTC_DS3231_setTime(); delay(15); // give the eeprom a little time
 RTC_DS3231_getTime();            // DS3231 Vbat = 2.3v min
-i2c_setRegisterBit(DS3231_ADDRESS,DS3231_STATUS_REG,7,0);  //clear the OSF flag after time has been set
 sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute);  
 Serial.print(F("RTC NOW SET to: "));Serial.println(CycleTimeStamp);
 i2c_setRegisterBit(DS3231_ADDRESS,DS3231_STATUS_REG,7,0);//clear the OSF flag after time is set
@@ -464,7 +467,6 @@ currentBatteryRead = readBattery();
 
 TWBR = 2;          // I2C bus at 400khz - works on DS3231  // (1msec) Tlow while 1.3 microseconds is the official standard
 bitClear(PORTB,5); // pin13 LED indicator LED PULLUP OFF
-sensorArrayPointer = 0;
 
 //====================================================================================================
 }  // terminator for void setup()
@@ -487,7 +489,7 @@ void loop (){
 for (uint16_t forwardEEmemPointr = 0; forwardEEmemPointr < (sensorEEbytesOfStorage -sensorBytesPerRecord); forwardEEmemPointr += sensorBytesPerRecord) { 
 
 // if BOTH sensor & opd buffers are saving to the same eeprom...
-   if (sensorEEpromI2Caddr == opdEEpromI2Caddr) {  // AND their memory pointers overlap the eeprom is full: shutdown logger   
+   if (sensorEEpromI2Caddr == opdEEpromI2Caddr) {    // AND their memory pointers overlap the eeprom is full -> shutdown   
       if (forwardEEmemPointr > opdEEprMemPointer){break;} 
    }
   
@@ -506,7 +508,10 @@ for (uint16_t forwardEEmemPointr = 0; forwardEEmemPointr < (sensorEEbytesOfStora
   if (Alarmminute > 59) {  //error catch - if alarmminute=60 the interrupt never triggers due to rollover!
         Alarmminute = 0; Alarmhour = Alarmhour + 1;
         if (Alarmhour > 23) {
-          Alarmhour = 0; midnightRollover = true;
+          Alarmhour = 0; 
+            if(!BatteryReadingEveryCycle){   // skip the usual midnight reading IF you are already forceing new voltage readings
+              midnightRollover=true;         // at every sensordata save into the eeprom 
+            }
         }
       }  //terminator for if (Alarmminute > 59) rollover catching
 
@@ -550,7 +555,7 @@ readNTCthermistor();
 //====================================================================================================
 //====================================================================================================
 #ifdef ECHO_TO_SERIAL
-    Serial.print(F(" (Forward) EEprom pointer: "));Serial.print(forwardEEmemPointr);  
+    Serial.print(F("(Forward) EEprom pointer: "));Serial.print(forwardEEmemPointr);  
     Serial.print(F(" , (Backward) EEprom pointer: "));Serial.println(opdEEprMemPointer); 
     sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute); // sprintf ref  http://www.perlmonks.org/?node_id=20519
     Serial.print(CycleTimeStamp);
@@ -638,17 +643,16 @@ sensorDataBuffer[sensorArrayPointer] = highByte(resistanceof10kNTC);
 #endif
 
 //=================== oncePerDayEvents=======================
-  //in each pass you can add 1, 2, 4 or 8 bytes to opdDataBuffer - not 3 , not 5, not 7 etc or you mess up the powers-of-2 math
+//in each pass you can add 1, 2, 4 or 8 bytes to opdDataBuffer 
+// - not 3 , not 5, not 7 etc or you mess up the powers-of-2 math
 
-if(BatteryReadingEveryCycle){   // only used for rapid testing
-     midnightRollover=true;     // forces new coin cell voltage reading every opd buffersave
-}
 // OPD data gets stored IN REVERSE ORDER to share same EEprom storing sensorDataBuffer
 // NOTE: data bytes added to the buffer per cycle MUST DIVIDE EVENLY into sizeof(opdDataBuffer)
 // AND: the (number) of bytes you store must match #define opdBytesPerRecord (number) at start of program
 
-if (midnightRollover) {    //normally set true only on the midnight hour rollover but can be forced by BatteryReadingEveryCycle
+if (midnightRollover || BatteryReadingEveryCycle) {    //normally true only on the midnight hour rollover but can be forced by BatteryReadingEveryCycle
 
+if (newBatteryReadingReady) {                    // no point in storing new data if it was not generated
   opdArrayPointer=opdArrayPointer-1;             // incrementing backwards here for stack/heap method
   integerBuffer = round((LowestBattery-1700)/16);
   if(integerBuffer<1){integerBuffer=1;}          // to preserve END of DATA check
@@ -661,6 +665,9 @@ if (midnightRollover) {    //normally set true only on the midnight hour rollove
   if(integerBuffer<0){integerBuffer=0;}          // sets lower cutoff to -12.25C!
   opdDataBuffer[opdArrayPointer] = integerBuffer;
 #endif
+
+   newBatteryReadingReady = false;
+}// if(newBatteryReadingReady) 
 
 if (opdArrayPointer ==0) {    // the Buffer is full - so transfer that data to the eeprom
 
@@ -777,9 +784,9 @@ Serial.print(F("UnixTime,"));
 #endif
 
     //unixtime index value stored in penultimate four bytes of internal eeprom
-    EEPROM.get(1016,utime.EE_byteArray);           //note bytearray unioned w utime.cyleTimeStart
-    uint32_t unix_timeStamp; // ULong to 4,294,967,295
-    int32_t RecordCounter = 0;
+    EEPROM.get(1016,utime.EE_byteArray);           // note bytearray unioned w utime.cyleTimeStart
+    uint32_t unix_timeStamp;
+    uint32_t RecordCounter = 0;
     
 for (uint16_t i = 0; i < (sensorEEbytesOfStorage-sensorBytesPerRecord); i+=sensorBytesPerRecord) { //increment by # of bytes PER RECORD in eeprom
           
@@ -850,42 +857,46 @@ if (convertDataFlag){  //UnixTime is 'reconstructed' from start time & record nu
 //=================================================================================
 void sendOPDreadings2Serial(boolean convertDataFlag) {     // data saved when midnight rollover flags true
 //=================================================================================
-   
+
    uint32_t unix_timeStamp;
    uint32_t RecordCounter = 0; // uint16_t good to 65535 - only need uint32_t for eeproms larger than 64k
-   Serial.println(F("UnixTime,LOWbat,RTCtemp")); //change this to suit the data save in oncePerDayEvents()
+   Serial.print(F("UnixTime,LOWbat")); //change this to suit the data save in oncePerDayEvents()
    
-if (BatteryReadingEveryCycle){  //using the same TimeStamp index as the sensor records
+  if (BatteryReadingEveryCycle){  //using the same TimeStamp index as the sensor records
+   Serial.print(F("(EverySave)"));
    EEPROM.get(1016,utime.EE_byteArray);
-}else{
+   RecordCounter++;
+  }else{
    //the normal onceperday 'midnight' time index value stored in 2nd to last four bytes of the int.EEprom
    EEPROM.get(1020,utime.EE_byteArray); // filling utime.EE_byteArray populates utime.cyleTimeStart via union
-}
-
-  
-   for (uint16_t i = (opdEEbytesOfStorage-1) ; i >= opdBytesPerRecord; i-=opdBytesPerRecord) { //this loop increments backwards 
+  }
+#ifndef RTC_ONLY
+   Serial.print(F(",RTCtemp"));
+#endif
+   Serial.println();Serial.flush();
+   
+for (uint16_t i = (opdEEbytesOfStorage-1) ; i >= opdBytesPerRecord; i-=opdBytesPerRecord) { //this loop increments backwards 
 
        integerBuffer = i2c_eeprom_read_byte(opdEEpromI2Caddr,i); // byte will not be zero with battery reads above 1700mv
-       if(integerBuffer==0 & convertDataFlag){break;}   //stops sending if zero is found
+       if(integerBuffer==0 & convertDataFlag){break;}            //stops sending if zero is found
 
-if (convertDataFlag){           //UnixTime is 'reconstructed' from start time & record number 
+if (convertDataFlag){                //UnixTime is 'reconstructed' from start index & record number 
   
-    if (BatteryReadingEveryCycle){   //then use the same TimeStamp calc as the sensor records
-       unix_timeStamp = utime.cyleTimeStart + (uint32_t)(60UL*RecordCounter*SampleIntervalMinutes); //used if you are using more than one byte per record        }
-    }else{
-        //but 1 day = 86400 seconds is the normal time increment for once per day record
-       unix_timeStamp = utime.cyleTimeStart + (86400UL * RecordCounter);     
-    } //if(BatteryReadingEveryCycle)
+    if (BatteryReadingEveryCycle){   // battery readings happen when sensorDataBuffer gets written to eeprom
+       unix_timeStamp = utime.cyleTimeStart + (uint32_t)(RecordCounter*(sizeof(sensorDataBuffer)/sensorBytesPerRecord)*SampleIntervalMinutes*60UL); //used if you are using more than one byte per record        }
+    }else{                           // 1 day = 86400 seconds is the normal time increment for once per day record
+       unix_timeStamp = utime.cyleTimeStart + (86400UL * RecordCounter) - 86400UL; //we actually save the previous midnight read on the NExt rollover  
+    }                                //if (BatteryReadingEveryCycle)
     
-       Serial.print(unix_timeStamp);Serial.print(","); //UL forces long calc
-} //if (convertDataFlag) 
+     Serial.print(unix_timeStamp);Serial.print(","); //note that timestamps do not print with 'raw' option selected
+
+     integerBuffer =(integerBuffer*16)+1700; //4096mv range at 16mv resolution
      
-     if(convertDataFlag){  //then restore LOWEST Battery value from one byte encoded in eeprom
-       integerBuffer =(integerBuffer*16)+1700; //4096mv range at 16mv resolution
-       }
+} //if (convertDataFlag) 
+  
      Serial.print(integerBuffer);
 
-#ifndef RTC_ONLY      //no need for RTC temp in opd record for RTC only config
+#ifndef RTC_ONLY      //no need for RTC temp in opd for RTC is already our temp sensor
 
     integerBuffer=i2c_eeprom_read_byte(opdEEpromI2Caddr,i-1);
          
@@ -1074,12 +1085,13 @@ byte i2c_eeprom_read_byte( uint8_t deviceaddress, uint16_t eeaddress ) {
 void Write_i2c_eeprom_array( uint8_t deviceAddress, uint16_t registerAddress_16bit,byte *arrayPointer,uint8_t numOfBytes){ 
 
 int OLDadcReading;
-
-// lowering I2C bus speed for slower eeproms but test your eeproms! - on most units the 4K works fine at 400KHz
-if (midnightRollover){   
-  if(opdEEbytesOfStorage==4096){TWBR=32;}else{TWBR=2;}
-} else {
-  if(sensorEEbytesOfStorage==4096){TWBR=32;}else{TWBR=2;} 
+ 
+// lowering I2C bus speed for slower 4k eeproms but test your eeproms - many work fine at faster bus speeds.
+if (deviceAddress==opdEEpromI2Caddr){   
+   if(opdEEbytesOfStorage==4096){TWBR=32;}
+}
+if (deviceAddress==sensorEEpromI2Caddr){ 
+  if(sensorEEbytesOfStorage==4096){TWBR=32;}
 }
 
     // 4k AT24c32 writes for 10ms @3mA(max), but newer eeproms can take only only 5ms @3mA
@@ -1094,7 +1106,7 @@ if (midnightRollover){
 // WARNING: Be careful about what you do immediately AFTER changing the CPU speed with CLKPR!
 // some peripherals need a couple of clock cycles before they can be addressed after CLKPR or THEY WILL HANG
 
-if (midnightRollover){
+if (midnightRollover || BatteryReadingEveryCycle){
     noInterrupts();CLKPR=bit(CLKPCE);CLKPR=clock_div_8;interrupts();// slow processor to 1MHZ for low current       
     power_adc_enable();
     ADCSRA = set_ADCSRA; ADMUX = set_ADMUX;// ADC needs time ~1ms(?) for 1.1v on AREF cap to stabilize
@@ -1112,7 +1124,8 @@ if (midnightRollover){
     TCNT2=0;                            // reset T2 counter to zero
     interrupts();  
         do{
-        sleep_cpu(); integerBuffer++;   // ADD 6 clock ticks to wake from IDLE //~ 0.261 msec per T2 overflow at 1mhz 
+        sleep_cpu(); 
+        integerBuffer++;   // ADD 6 clock ticks to wake from IDLE //~ 0.261 msec per T2 overflow at 1mhz 
         }while (integerBuffer<7);       // 100 overflows =~2msec at 8Mhz BUT only ~8 overflows at 1MHZ
     power_timer2_disable();
 //========================================end of Timer2 sleep-delay for ~1.56msec======================
@@ -1134,30 +1147,31 @@ if (midnightRollover){
            byteBuffer1=ADCL; byteBuffer2=ADCH;         // low byte first
            integerBuffer = ((byteBuffer2 << 8) | byteBuffer1);       
       }while (integerBuffer<OLDadcReading);
-         
-} // if (midnightRollover)
+
+} // if (midnightRollover || BatteryReadingEveryCycle)
 
   noInterrupts();CLKPR=bit(CLKPCE);CLKPR=clock_div_1;interrupts(); // ALWAYS return to 8MHz before sleep
   LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);                // battery recovery time from EEprom load
                                                                    // sleep_disable(); taken care of in LowPower.powerDown
-if (midnightRollover){
+if (midnightRollover || BatteryReadingEveryCycle){
    bitClear(ADCSRA,ADIE); ADCSRA=0; power_adc_disable();       // turn off ADC & interupt generation
    LowestBattery = InternalReferenceConstant / OLDadcReading;  // LONG calc forced by ref constant = 630 cpu clocks =do this after 8MHz
-   power_timer0_enable();  // T0 needed for I2C bus comms
-} // if (midnightRollover)
+   newBatteryReadingReady = true;
+   power_timer0_enable(); // T0 needed for I2C bus comms
+} // if (midnightRollover || BatteryReadingEveryCycle)
 
-   TWBR=2; //back to 400KHz I2C bus for RTC
+   TWBR=2; //back to 400KHz I2C bus for RTC comms
 } // terminates Write_i2c_eeprom_array
 
 // TIMER2 interrupt service routine
-ISR(TIMER2_OVF_vect){           //must be here or you hang the system at the first T2 overflow...
-}
+// must be here or you hang the system at the first T2 overflow...
+ISR(TIMER2_OVF_vect){}
 
 //================================
 #ifdef DigitalPinReadAnalogTherm
 //=================================
 // Based on Nick Gammon's frequency counter at https://www.gammon.com.au/forum/?id=11504
-// Adapted by Edward Mallon for ratiometric reading of resistive sensors with ICU on D8. For a details see: 
+// Adapted by Edward Mallon for ratiometric reading of resistive sensors with ICU on D8. For a detailed explaination: 
 // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
 
 //=========================================================================================
@@ -1248,7 +1262,7 @@ resistanceof10kNTC=(elapsedTimeSensor * referencePullupResistance) / elapsedTime
 //resistanceof10kNTC=((uint64_t)elapsedTimeSensor * (uint64_t)referencePullupResistance) / elapsedTimeReff;
 
 #ifdef ECHO_TO_SERIAL
-integerBuffer = elapsedTimeSensor;      //preserve variable for sending to serial later
+integerBuffer = elapsedTimeSensor;  //preserves variable for printing to serial later
 #endif
 
 #ifdef DigitalPinReadCDScell  //======= if enabled by define at start of program =============
