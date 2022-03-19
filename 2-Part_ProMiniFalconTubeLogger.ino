@@ -423,23 +423,16 @@ Serial.println(F("Starting the Data logger...")); Serial.flush();
 
 #else   //sleep logger till time is sync'd with 1st sampling interval
 
-  int syncdelay=1;
-  Alarmday = t_day;Alarmhour = t_hour;Alarmminute = t_minute;Alarmsecond = 0;
-  syncdelay = Alarmminute % SampleIntervalMinutes;  // 7 % 10 = 7 because 7 / 10 < 1, e.g. 10 does not fit even once in seven. So the entire value of 7 becomes the remainder.
-  syncdelay = SampleIntervalMinutes-syncdelay;
+  Alarmday = t_day;Alarmhour = t_hour;
+  Alarmminute=((t_minute/SampleIntervalMinutes)*SampleIntervalMinutes)+(2*SampleIntervalMinutes);// cast to int16_t 
     
-  Alarmminute = Alarmminute + syncdelay;
-  if (Alarmminute > 59) {                     // check for roll-over
+  if (Alarmminute > 59) {                // check for roll-over
      Alarmminute = SampleIntervalMinutes; Alarmhour = Alarmhour + 1; 
-     syncdelay = (60 - t_minute)+ SampleIntervalMinutes; //for (60UL*syncdelay) calc
         if (Alarmhour > 23) { Alarmhour = 0;} // check for roll-over
   }
   
   RTC_DS3231_setAlarm1Simple(Alarmhour, Alarmminute);
   RTC_DS3231_turnOnAlarm(1);
-
-  utime.cyleTimeStart = timeCalcVariable +(60UL*syncdelay); //previous utime reading plus how many seconds you waited to sync
-  EEPROM.put(1016,utime.EE_byteArray);  // save this 4-byte sensor read UnixTime index {via union} to intEEprom location 0
 
   Serial.println(F("RED d13 LED will now flash slowly until the 1st sensor read is taken."));
   Serial.println(F("Disconnect from the UART now - NO additional messages will be sent."));
@@ -459,6 +452,11 @@ Serial.println(F("Starting the Data logger...")); Serial.flush();
    
   //detachInterrupt(0); done in the interrupt
   RTC_DS3231_turnOffBothAlarms(); //resets rtc_INT0_Flag=false;
+
+  RTC_DS3231_getTime();
+  utime.cyleTimeStart = RTC_DS3231_unixtime();
+  EEPROM.put(1016,utime.EE_byteArray);
+  LowPower.powerDown(SLEEP_15MS,ADC_ON,BOD_OFF);
 
 #endif // #ifdef ECHO_TO_SERIAL
 
