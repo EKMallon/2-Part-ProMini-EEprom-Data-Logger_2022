@@ -751,9 +751,13 @@ void unusedPins2InputPullup(){
   PORTC |= B00001111; // pins A3..A2 // leave these low if you add an RGB led to A0-A3
 
 #ifdef DigitalPinReadAnalogTherm
-  PORTB &= B11111100; // 9-8 pullups OFF // if using ICU on D8 to read NTC/CDS sensors
+  PORTB &= B11111110; // 8 pullup OFF // if using ICU on D8 to read NTC/CDS sensors
   PORTD &= B00111111; // 7-6 pullups OFF // otherwise we charge the sampling capacitor
   #endif
+
+#ifdef DigitalPinReadCDScell
+  PORTB &= B11111101; // D9 pullup OFF // if using ICU on D8 to read NTC/CDS sensors
+#endif
 
 #ifndef ECHO_TO_SERIAL   // don't mess with USART pins in ECHO_TO_SERIAL debug mode
   DDRD &= B11111100;     // d1&0 set as inputs
