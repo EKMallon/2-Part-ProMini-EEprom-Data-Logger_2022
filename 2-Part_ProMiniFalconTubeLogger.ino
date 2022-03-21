@@ -349,7 +349,7 @@ do {
           Wire.endTransmission();//this is where the send actually happens
           CurrentMemAddress = CurrentMemAddress + sizeof(opdDataBuffer);
           if ((CurrentMemAddress % 64) == 0){Serial.print(F("."));} //progress bar
-          if ((CurrentMemAddress % 2048) == 0){Serial.println();}   //return every 32 dots
+          if ((CurrentMemAddress % 4096) == 0){Serial.println();}   //return
           do  // poll the eeprom to see when next bytes can be written:
           { Wire.beginTransmission(opdEEpromI2Caddr); }
           while (Wire.endTransmission() != 0x00);
@@ -372,7 +372,7 @@ do {
           Wire.endTransmission();//this is where the send actually happens
           CurrentMemAddress = CurrentMemAddress + sizeof(sensorDataBuffer);
           if ((CurrentMemAddress % 64) == 0){Serial.print(F("."));} //progress bar
-          if ((CurrentMemAddress % 2048) == 0){Serial.println();}   //return every 32 dots
+          if ((CurrentMemAddress % 4096) == 0){Serial.println();}   //return
           //serial print takes about 10 seconds divided by the baud rate, per character. = 1/10ms per char at 57000
 
           do  //we are still powered by uart: poll the eeprom to see when next bytes can be written:
