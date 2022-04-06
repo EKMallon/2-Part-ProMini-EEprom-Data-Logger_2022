@@ -3,7 +3,7 @@
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
 
 /*
-This program is supports of an ongoing series of  DIY 'Classroom Logger' tutorials 
+This program supports an ongoing series of  DIY 'Classroom Logger' tutorials 
 from the Cave Pearl Project. The idea is to provide a starting point for self-built 
 student projects in environmental monitoring courses.
 
