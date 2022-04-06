@@ -74,7 +74,7 @@ const char NTCcal[] PROGMEM = "No cal for this unit yet...";
 #define opdEEbytesOfStorage 4096   // AT24c256 YL-90 (red module)32768@0x50 // OR // 64k AT24c512(via chip swap on RTC)65536@0x57
 uint8_t opdDataBuffer[16];          // [16] is max unless you increase the I2C buffers
 int8_t opdArrayPointer= sizeof(opdDataBuffer); // opd Pointer increments backwards & must be able to hold negative value without overflow
-uint32_t opdEEprMemPointer = opdEEbytesOfStorage-1;
+uint32_t opdEEprMemPointer = opdEEbytesOfStorage;
 #ifdef RTC_ONLY
 uint8_t opdBytesPerRecord = 1;       // default for RTC_ONLY
 #else
