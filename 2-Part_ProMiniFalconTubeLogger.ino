@@ -488,7 +488,9 @@ for (uint16_t forwardEEmemPointr = 0; forwardEEmemPointr < (sensorEEbytesOfStora
 
 // if BOTH sensor & opd buffers are saving to the same eeprom...
    if (sensorEEpromI2Caddr == opdEEpromI2Caddr) {    // AND their memory pointers overlap the eeprom is full -> shutdown   
-      if (forwardEEmemPointr > opdEEprMemPointer){break;} 
+      if ((forwardEEmemPointr + sizeof(sensorDataBuffer)) >= opdEEprMemPointer){break;}
+      // this leaves a buffer of 'zeros' between the two data streams being saved in the eeprom as 'stop' codes for sendSensorData2Serial & sendOPDreadings2Serial
+      // note sizeof(sensorDataBuffer) & sizeof(opdDataBuffer) are usually the same size (within wire library limits)
    }
   
    RTC_DS3231_getTime();
