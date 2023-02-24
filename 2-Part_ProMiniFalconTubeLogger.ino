@@ -1165,7 +1165,7 @@ if (newBatteryReading){
              }while(bit_is_set(ADCSRA,ADSC));          // the ADC clears ADSC flag when conversion complete 
            byteBuffer1=ADCL; byteBuffer2=ADCH;         // low byte first
            integerBuffer = ((byteBuffer2 << 8) | byteBuffer1);       
-      }while (integerBuffer<OLDadcReading);
+      }while (integerBuffer>=OLDadcReading);
 
 } // terminates if (newBatteryReading){
 
