@@ -101,7 +101,7 @@ uint8_t sensorBytesPerRecord = 4;
 #endif
 
 boolean newBatteryReading = false;
-uint16_t systemShutdownVoltage = 2750; // MUST be > BOD default of 2700mv (also EEprom limit)
+uint16_t systemShutdownVoltage = 2800; // MUST be > BOD default of 2700mv (also EEprom limit)
 byte default_ADCSRA,default_ADMUX;     // stores default register settings
 byte set_ADCSRA, set_ADMUX;            // custom settings for readbattery() via 1.1 internal band gap reference
 volatile uint8_t adc_irq_cnt;          // used in readADCLowNoise ISR to allow averaging
