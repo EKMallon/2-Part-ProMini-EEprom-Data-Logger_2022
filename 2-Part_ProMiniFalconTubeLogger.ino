@@ -6,7 +6,7 @@
 // https://www.youtube.com/watch?v=58ps9fUyY0Q&t=0s&ab_channel=EdwardMallon
 
 /*
-This program supports an ongoing series of  DIY 'Classroom Logger' tutorials 
+This program supports an ongoing series of DIY 'Classroom Logger' tutorials 
 from the Cave Pearl Project. The goal is to provide a starting point 
 for self-built student projects in environmental monitoring courses.
 This 'low power' 2-module iteration runs the logger from a CR2032 coin cell and uses 
@@ -43,7 +43,7 @@ loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/1
 // Populate deploymentDetails[] with information about your logger. For example:
 const char deploymentDetails[] PROGMEM = "1085872L,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20220216";
 
-#define InternalReferenceConstant 1126400L //1126400L is default value! = 1100mV internal vref * 1024 
+#define InternalReferenceConstant 1085872L //1126400L is default value! = 1100mV internal vref * 1024 
 // adding/subtracting 400 from the constant raises/lowers the 'calculated' result from
 // readBattery() by ~1 millivolt, simply read the rail with a DVM while running on UART power
 // change the constant, reload & restart with ECHO_TO_SERIAL on until the voltage is correct
@@ -61,6 +61,7 @@ boolean SaveBatteryEveryCycle = true; // default=false to save battery log only 
 //#define ReadNTC_6ref7ntc  // 2-bytes: can be combined with ReadLDR_onD9 or stand alone
 //#define ReadLDR_onD9      // 2-bytes: can be combined with ReadNTC_6ref7ntc or stand alone
 //#define BMP280_Address 0x76 // 4bytes: a 'code example' to show steps required to add other sensors to your logger
+//#define bh1750_Address 0x23
 
 boolean blinkLED = true;    // enables/disables LED pips except those in setup & error functions
 //#define LED_GndGB_A0-A2   // A0=gnd & Green=A1, blue=A2 if you added an LED as shown in the build video
@@ -133,7 +134,6 @@ volatile boolean rtc_INT0_Flag = false;  // volatile because it's changed in an 
 boolean midnightRollover = false; 
 int rtc_TEMP_Raw = 0; 
 float rtc_TEMP_degC = 0.0;
-
 union {                       // for Unixtime INDEX storage & retrieval from eeproms
   uint32_t cyleTimeStart;     // 0-4,294,967,295 large enough for unixtime
   uint8_t EE_byteArray[4];    // Arduino: char = int8_t but byte = uint8_t
@@ -160,6 +160,25 @@ const char compileTime[] PROGMEM = __TIME__;
 BMP280_DEV bmp280;        // Create a BMP280_DEV library object. called ‘bmp280’
 float Bmp280_Temp_degC,  Bmp280_Pr_mBar,  Bmp280_altitude;    // 3 float variables for output
 #endif  //BMP280_Address       // ================================================
+
+#ifdef bh1750_Address     //=============================================
+#include <hp_BH1750.h>      //from  https://github.com/Starmbi/hp_BH1750  
+//this lib returns the sensor to sleep automatically after each read & supports auto-ranging.
+hp_BH1750 bh1750;        // Instantiate a BH1750FVI library object
+float lux_BH1750;        // a variable to receive the sensor reading
+//int32_t BH1750_NewReading = 10000;
+//int32_t BH1750_OldReading = 10000;
+union {
+  uint32_t lux_Integer;     //0-4,294,967,295
+  uint8_t lux_byteArray[4]; //0-255 each byte
+} BH1750sensor;
+//Note: 'unsigned long' is Little Endian on ProMini
+//BH1750sensor.lux_Integer = 0x5CE3B975
+//BH1750sensor.lux_byteArray[0] = 0x75, BH1750sensor.lux_byteArray[1] = 0xB9, and so on.
+//ALSO arrays are ZERO indexed so 4 element array is indexed with 0-3
+//ALT method without union: https://forum.arduino.cc/t/split-long-into-bytes-for-transmitting-over-ic2-solved/90004
+#endif  // bh1750_Address ================================================
+
 
 //====================================================
 #if defined(ReadNTC_6ref7ntc) || defined(ReadLDR_onD9)
@@ -198,6 +217,9 @@ void setup () {
   #endif
   #ifdef BMP280_Address
     sensorBytesPerRecord+= 4; //  sensor also provides temp
+  #endif
+  #ifdef bh1750_Address
+    sensorBytesPerRecord+= 4; //  four byte LONG integer
   #endif
 
   // configure ADC on 168/328 boards to read the rail voltage using the internal 1.1 aref
@@ -586,12 +608,21 @@ bmp280.setTempOversampling (OVERSAMPLING_X2); // NOTE: NO benefit to Pr accuracy
 //×16 Ultra high resolution 20 bit / 0.0003 °C
 bmp280.setSeaLevelPressure (1013.25f);  // default value for altitude calculations
 bmp280.setIIRFilter(IIR_FILTER_OFF); 
-
 bmp280.startForcedConversion(); // time needed here depends on oversampling settings
 LowPower.powerDown(SLEEP_60MS, ADC_ON, BOD_OFF); // long enough for max rez.
 bmp280.getCurrentMeasurements(Bmp280_Temp_degC,Bmp280_Pr_mBar,Bmp280_altitude);
 Serial.println(F("BMP280 started"));Serial.flush();
 #endif //BMP280_Address
+
+#ifdef bh1750_Address
+  Serial.println(F("BH1750 light sensor MUST be exposed to >150 lux @ startup")); 
+  Serial.println(F("for self-cal or it may freeze randomly. 15 sec = minimum interval."));Serial.println();Serial.flush();
+  bh1750.begin(bh1750_Address); // set address & initialize
+  bh1750.calibrateTiming();     // NOTE: ambient light must be at least 140 lux when this runs!
+  bh1750.start (BH1750_QUALITY_LOW, BH1750_MTREG_LOW); // Quality LOW = fastest readings
+  // H-Resolution Mode Measurement Time 120-180 ms depending on light levels
+  // L-Resolution Mode Measurement Time 16-24 msec //LOW MTreg:31  resolution lux:7.4, 121557 is highest lux
+#endif //bh1750_Address
 
 Serial.println(F("Starting the Data logger..."));Serial.flush();
   
@@ -782,14 +813,6 @@ floatBuffer = (rtc_TEMP_degC + 10.0) / 0.0625;    //converts the RTC float tempe
 rtc_TEMP_Raw = (int)(floatBuffer);                //this integer takes less space in eeprom than the float
 LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);
 
-#ifdef BMP280_Address  //========================================================================== 
-bmp280.startForcedConversion();                  // time needed here depends on oversampling settings
-bitClear(DDRB,5);bitSet(PORTB,5);                // D13 indicator LED adds ~50uA current
-LowPower.powerDown(SLEEP_60MS, ADC_ON, BOD_OFF); // uses watchdog timer
-bitClear(PORTB,5);                               // D13 PULLUP OFF
-bmp280.getCurrentMeasurements(Bmp280_Temp_degC,Bmp280_Pr_mBar,Bmp280_altitude);
-#endif
-
 #if defined(ReadLDR_onD9) || defined(ReadNTC_6ref7ntc)
 ConditionCapacitorOnD8(); // charge cycles the cap through D8 to standardize condition
   //AND floats all pins with resistor/sensors connected to that common capacitor 
@@ -818,6 +841,28 @@ ConditionCapacitorOnD8(); // charge cycles the cap through D8 to standardize con
     Serial.flush();
     #endif  
 #endif //#ifdef ReadLDR_onD9
+
+#ifdef BMP280_Address  //========================================================================== 
+bmp280.startForcedConversion();                  // time needed here depends on oversampling settings
+bitClear(DDRB,5);bitSet(PORTB,5);                // D13 indicator LED adds ~50uA current
+LowPower.powerDown(SLEEP_60MS, ADC_ON, BOD_OFF); // uses watchdog timer
+bitClear(PORTB,5);                               // D13 PULLUP OFF
+bmp280.getCurrentMeasurements(Bmp280_Temp_degC,Bmp280_Pr_mBar,Bmp280_altitude);
+#endif //BMP280_Address
+
+#ifdef bh1750_Address //=========================================================================== 
+bh1750.start (); //triggers a new sensor reading
+do{              //sleep till new reading is ready
+LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);    // uses watchdog timer
+}while(bh1750.hasValue() == false); 
+// L-Resolution Mode Measurement Time 16-24 msec 
+// H-Resolution Mode Measurement Time 120-180 ms depending on light levels
+// LOW MTreg:31  resolution lux:7.4, 121557 is highest lux
+lux_BH1750 = bh1750.getLux();                    // request the reading 
+if(lux_BH1750<1.0){lux_BH1750=1.0;}              // zero catch for EOF check later which uses zero value
+BH1750sensor.lux_Integer =uint32_t(lux_BH1750);  // reading can reach 120,000
+#endif //bh1750_Address
+
 //===================================================================================================
 //====================================================================================================
 // This is for serial output for debugging only  - comment out ECHO_TO_SERIAL skips this
@@ -836,6 +881,10 @@ ConditionCapacitorOnD8(); // charge cycles the cap through D8 to standardize con
     Serial.print(F(", BMP280 Pressure:"));Serial.println(Bmp280_Pr_mBar,1);
   #endif
 
+  #ifdef bh1750_Address
+    Serial.print(F(", BH1750 Lux: "));Serial.print(BH1750sensor.lux_Integer);
+  #endif
+  
     Serial.println();
     Serial.flush();
 #endif  //ENDIF FOR ECHO TO SERIAL
@@ -902,7 +951,19 @@ sensorDataBuffer[sensorArrayPointer] = lowByte(integerBuffer);
   sensorArrayPointer = sensorArrayPointer+1;
 sensorDataBuffer[sensorArrayPointer] = highByte(integerBuffer);
   sensorArrayPointer = sensorArrayPointer+1;
-#endif
+#endif //BMP280_Address
+
+#ifdef bh1750_Address  //===========================================================
+//4-byte union encoding Note: 'unsigned long' is Little Endian on arduino
+//if BH1750sensor.lux_Integer = 0x5CE3B975 then BH1750sensor.lux_byteArray[0] = 0x75, long_num.bytes[1] = 0xB9, and so on.
+if(BH1750sensor.lux_byteArray[0]==0){BH1750sensor.lux_byteArray[0]=1;} 
+//zero trap preserves EOF zero check in sendSensorData2Serial()
+
+sensorDataBuffer[sensorArrayPointer] = BH1750sensor.lux_byteArray[0];sensorArrayPointer++;
+sensorDataBuffer[sensorArrayPointer] = BH1750sensor.lux_byteArray[1];sensorArrayPointer++;
+sensorDataBuffer[sensorArrayPointer] = BH1750sensor.lux_byteArray[2];sensorArrayPointer++;
+sensorDataBuffer[sensorArrayPointer] = BH1750sensor.lux_byteArray[3];sensorArrayPointer++;
+#endif //bh1750_Address
 
 //=================== oncePerDayEvents=======================
 // OPD data gets stored IN REVERSE ORDER to share same EEprom storing sensorDataBuffer
@@ -1091,6 +1152,9 @@ Serial.print(F("UnixTime,"));
 #ifdef BMP280_Address
   Serial.print(F("BMP[T°C],Pr[mbar],"));
 #endif
+#ifdef bh1750_Address
+  Serial.print(F("BH1750lux,"));
+#endif
  Serial.println();Serial.flush();
 
     //unixtime index value stored in penultimate four bytes of internal eeprom
@@ -1155,6 +1219,14 @@ for (uint32_t i = 0; i <= (sensorEEbytesOfStorage-sensorBytesPerRecord); i+=sens
       integerBuffer = i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;//hi byte
       integerBuffer = integerBuffer <<8 | byteBuffer1;
       Serial.print((float)(integerBuffer)/10.0,1);
+#endif
+
+#ifdef bh1750_Address  // 4 byte Long Integer concatenated via union
+BH1750sensor.lux_byteArray[0]= i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;
+BH1750sensor.lux_byteArray[1]= i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;
+BH1750sensor.lux_byteArray[2]= i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;
+BH1750sensor.lux_byteArray[3]= i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;
+Serial.print(BH1750sensor.lux_Integer);Serial.print(F(","));
 #endif
 
           } //if(convertDataFlag)
