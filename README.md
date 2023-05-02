@@ -4,7 +4,7 @@
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from Edward Mallon & Dr. Patricia Beddows at the Cave Pearl Project. The idea is to provide a starting point for student projects in environmental monitoring courses and/or thesis level research.<br/>
 <br/>The build tutorial that matches this code can be found at:<br/>
 https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
-with a build video tutorial at:
+<br/>with a build video tutorial at:<br/>
 https://www.youtube.com/watch?v=58ps9fUyY0Q&t=0s&ab_channel=EdwardMallon
 ---
 <img   align="right" width="400" src="https://github.com/EKMallon/2-Part-ProMini-EEprom-Data-Logger_2022/blob/main/images/2-PartEEpromLogger_CavePearlProject_2022.jpg">
