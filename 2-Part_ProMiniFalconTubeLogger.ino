@@ -1109,7 +1109,7 @@ void unusedPins2OutputLow(){
 //SET all pins low      // with &= causes zeros to set
   PORTB &= B11000000;   // 13..8 LOW / pullups OFF(0)
   PORTD &= B00001111;   // 7..4 LOW / pullups OFF 
-  PORTC &= B1110000;    // A3..A0 LOW / pullups OFF   A4/5=I2C bus
+  PORTC &= B11110000;    // A3..A0 LOW / pullups OFF   A4/5=I2C bus
 
 //SET pins OUTPUT       // with |= only the ones set
   DDRB |=B00011111;     // D12-8 OUTPUT(1) //d13 stays input
@@ -1120,7 +1120,7 @@ void unusedPins2OutputLow(){
 
 //if no interrupt source connected on D3:
   PORTD &= B11110111;     // 3 LOW
-  DDRD |=B00001000;       // 3 OUTPUT
+  DDRD  |= B00001000;     // 3 OUTPUT
 
 #ifndef ECHO_TO_SERIAL   // don't change UART pins in ECHO_TO_SERIAL debug mode
   PORTD &= B11111100;    // 1-0 LOW
@@ -1997,22 +1997,22 @@ void error() {
   
   bitSet(ACSR,ACD); // Disable the analog comparator by setting the ACD bit (bit 7) of the ACSR register to one.
   ADCSRA = 0; SPCR = 0; // Disable ADC & SPI   //only use the PRR after setting ADCSRA to zero, otherwise the ADC is "frozen" in an active state.
-  power_all_disable(); // Turn everything else off - must come after disabling ADC.
-  //wdt_disable();     // wdt is off by default
+  power_all_disable();  // Turn everything else off - must come after disabling ADC.
+  //wdt_disable();      // wdt is off by default
 
 //unused pins to input-pullup     // &= causes zeros to set
-  DDRB &= B11000000; // pins 13..8 set to zero for input
-  DDRD &= B00000011; // pins 7..2 set as inputs
-  DDRC &= B11000000; // unused A5..A0 set as inputs// can I set low if disabled?
-  #ifndef ECHO_TO_SERIAL // don't mess with USART pins in ECHO_TO_SERIAL debug mode
-    DDRD &= B11111100;     // d1&0 set as inputs
-    PORTD &= B11111100;    // d1&0 low
+  DDRB &= B11000000;      // pins 13..8 set to zero for input
+  DDRD &= B00000011;      // pins 7..2 set as inputs
+  DDRC &= B11000000;      // unused A5..A0 set as inputs// can I set low if disabled?
+  #ifndef ECHO_TO_SERIAL  // don't mess with USART pins in ECHO_TO_SERIAL debug mode
+    DDRD &= B11111100;    // d1&0 set as inputs
+    PORTD &= B11111100;   // d1&0 low
   #endif
   
-//SET all pins low      // with &= causes zeros to set
-  PORTB &= B11000000;   // 13..8 LOW / pullups OFF(0)
-  PORTD &= B00000011;   // 7..2 LOW / pullups OFF     // leave D2 for RTC alarm line pullup & possibly D3
-  PORTC &= B1000000;    // A5..A0 LOW / pullups OFF   // leave A4/5=I2C bus has hardware pullups?
+//SET all pins low       // with &= causes zeros to set
+  PORTB &= B11000000;    // 13..8 LOW / pullups OFF(0)
+  PORTD &= B00000011;    // 7..2 LOW / pullups OFF     // leave D2 for RTC alarm line pullup & possibly D3
+  PORTC &= B11000000;    // A5..A0 LOW / pullups OFF   // leave A4/5=I2C bus has hardware pullups?
   
   #ifdef ECHO_TO_SERIAL
     bitClear(DDRB,5);bitSet(PORTB,5); // indicate ERROR STATUS with red LED ONLY if on UART!
