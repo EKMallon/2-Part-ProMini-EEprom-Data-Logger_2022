@@ -1651,7 +1651,7 @@ uint16_t ReadD6riseTimeOnD8(){
     power_twi_enable();        // cant use I2C bus without interrupts enabled
     #ifdef ECHO_TO_SERIAL
       power_usart0_enable();   
-      Serial.print(F(" D6: "));Serial.print(timer1CounterValue);Serial.flush(); 
+      Serial.print(F(" D6: "));Serial.print(timer1CounterValue);Serial.println(F(" 10k Ref. "));Serial.flush(); 
     #endif
 
 return timer1CounterValue;
