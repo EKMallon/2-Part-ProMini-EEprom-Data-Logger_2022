@@ -58,6 +58,7 @@ boolean SaveBatteryEveryCycle = true; // default=false to save battery log only 
 // Enable these to match your sensor configuration: 
 // NOTE: total sensor BYTES must be even divisior of #bytes in sensorDataBuffer[16];
 #define RTC_Temperature     // 1-byte: 0.25C resolution temp. using the RTC's internal temperature sensor
+//#define LogCurrentBattery //1-byte:  saves currentBatteryRead in sensor records
 //#define ReadNTC_6ref7ntc  // 2-bytes: can be combined with ReadLDR_onD9 or stand alone
 //#define ReadLDR_onD9      // 2-bytes: can be combined with ReadNTC_6ref7ntc or stand alone
 //#define BMP280_Address 0x76 // 4bytes: a 'code example' to show steps required to add other sensors to your logger
@@ -207,6 +208,9 @@ void setup () {
   // led pips ALWAYS use INPUT PULLUP resistor to reduce current load
 
   #ifdef RTC_Temperature
+    sensorBytesPerRecord++;   // encoded to 1-Byte
+  #endif
+  #ifdef LogCurrentBattery
     sensorBytesPerRecord++;   // encoded to 1-Byte
   #endif
   #ifdef ReadNTC_6ref7ntc 
@@ -874,7 +878,7 @@ BH1750sensor.lux_Integer =uint32_t(lux_BH1750);  // reading can reach 120,000
     sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute);
     Serial.print(CycleTimeStamp); // sprintf ref  http://www.perlmonks.org/?node_id=20519
     Serial.print(F(", RTC TempC: "));Serial.print(rtc_TEMP_degC,2);
-    Serial.print(F(", LOW Bat(mV)= "));Serial.println(LowestBattery);
+    Serial.print(F(", Bat(mV)= "));Serial.println(currentBatteryRead);
 
   #ifdef BMP280_Address
     Serial.print(F(", BMP280 Temp:"));Serial.print(Bmp280_Temp_degC,2);
@@ -918,7 +922,14 @@ if(integerBuffer<1){integerBuffer=1;}        // min value of 1 to preserve EOFch
 sensorDataBuffer[sensorArrayPointer] = integerBuffer;
 sensorArrayPointer = sensorArrayPointer+1;
 #endif //RTC_Temperature
-
+ 
+#ifdef LogCurrentBattery  //===========================================================
+  integerBuffer = (currentBatteryRead-1700)>>4;
+  if(integerBuffer<1){integerBuffer=1;} // Zero Trap to preserve END of DATA during sendOPDreadings2Serial
+  sensorDataBuffer[sensorArrayPointer] = integerBuffer; 
+  sensorArrayPointer = sensorArrayPointer+1;
+#endif //LogCurrentBattery
+ 
 #ifdef ReadNTC_6ref7ntc  //=========================================================
 byteBuffer1= lowByte(NTC_NewReading);
 if(byteBuffer1==0){byteBuffer1=1;} //to preserve zero EOF indicator in 'empty' EEprom space
@@ -1143,6 +1154,9 @@ Serial.print(F("UnixTime,"));
 #ifdef RTC_Temperature
   Serial.print(F("RTC T°C,"));
 #endif
+#ifdef LogCurrentBattery
+  Serial.print(F("Bat.[mv],"));
+#endif
 #ifdef ReadNTC_6ref7ntc
   Serial.print(F("NTC[Ω],"));
 #endif
@@ -1186,13 +1200,19 @@ for (uint32_t i = 0; i <= (sensorEEbytesOfStorage-sensorBytesPerRecord); i+=sens
   unix_timeStamp += secondsPerSampleInterval; //increment for the NEXT record after sending
 
 // order here must match the order in which you loaded the sensor array
-#ifdef RTC_Temperature                      // RTC temperature record: low side cutoff at 1 for minimum reading of -12.25C
+#ifdef RTC_Temperature     // RTC temperature record: low side cutoff at 1 for minimum reading of -12.25C
      integerBuffer = i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;           // read previously for EOF check
      integerBuffer=(integerBuffer*4)-40; 
      floatBuffer  =(integerBuffer*0.0625)-10.0;
      Serial.print(floatBuffer,2);Serial.print(F(",")); 
 #endif  //#ifdef RTC_Temperature 
 
+#ifdef LogCurrentBattery  //1 byte index encoding (same as OPD)
+        uint16_Buffer = i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;
+        uint16_Buffer =(uint16_Buffer<<4)+1700; // <<4 replaces *16
+        Serial.print(uint16_Buffer);Serial.print(F(","));
+#endif  //LogCurrentBattery
+   
 #ifdef ReadNTC_6ref7ntc  //NTC_NewReading is only stored as raw two data bytes, low byte first
       byteBuffer1 = i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;//low byte
       NTC_NewReading = i2c_eeprom_read_byte(sensorEEpromI2Caddr,RecMemoryPointer);RecMemoryPointer++;//hi byte
