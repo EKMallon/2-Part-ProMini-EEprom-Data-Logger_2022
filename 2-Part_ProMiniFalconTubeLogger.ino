@@ -1000,13 +1000,13 @@ if ((SaveBatteryEveryCycle && newBatteryReadReady) || (midnightRollover)){
   opdArrayPointer=opdArrayPointer-1;               // incrementing backwards here for stack/heap method
   opdDataBuffer[opdArrayPointer] = integerBuffer;  // battery reading stored in OPD buffer array
   opdEEprMemPointer=opdEEprMemPointer-1;           // decrement eeprom pointer for every byte added to opdDataBuffer[opdArrayPointer]
-
+  HighestBattery = 0;  // forces reset @ next readbattery
+ 
   if (SaveBatteryEveryCycle){
      newBatteryReadReady=false;  // flag sets True only when SENSORdata is written to eeprom
   }
   if (midnightRollover){ 
-     midnightRollover=false; newBatteryReadReady=false;
-     HighestBattery = 0;  // forces reset @ next readbattery
+     midnightRollover=false;
      LowestBattery = 5700;// forces reset @ next EEsave event
                           // Note: Hi/Lo resets once per day
   }
