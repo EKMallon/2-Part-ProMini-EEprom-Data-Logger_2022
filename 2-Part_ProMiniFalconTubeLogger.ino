@@ -1495,6 +1495,8 @@ uint8_t i2c_eeprom_read_byte(uint8_t deviceaddress, uint16_t eeaddress ) {
 // NOTE: this function uses the EEprom current to load the coin cell during voltage read
 void Write_i2c_eeprom_array( uint8_t deviceAddress, uint16_t registerAddress_16bit,byte *arrayPointer,uint8_t numOfBytes){ 
 
+ if (SaveBatteryEveryCycle) {LowestBattery =5764;} // force reset every cycle because midnightrollover is blocked
+
 // lowering I2C bus speed for slower 4k eeproms but test your eeproms - although many work fine at faster bus speeds.
     if (deviceAddress==opdEEpromI2Caddr){   
        if(opdEEbytesOfStorage==4096){TWBR=32;}
