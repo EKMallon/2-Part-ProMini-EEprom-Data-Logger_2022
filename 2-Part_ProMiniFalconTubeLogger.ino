@@ -42,20 +42,7 @@ loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/1
 // also starts the run with no sample interval sync delay so timestamps are not aligned
 
 // Populate deploymentDetails[] with information about your logger(s). For example:
-//const char deploymentDetails[] PROGMEM = "1085872L,4K ONLY @0x57,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20220216";
-//const char deploymentDetails[] PROGMEM = "1117050L,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,R=D13,GB=A0-2,";
-//const char deploymentDetails[] PROGMEM = "1095600L,4kOnly,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,R=D13,GB=A0-2,";
-//const char deploymentDetails[] PROGMEM = "CJ 1122090L,SINGLE 64k@0x51 eeprom ONLY,0.8uA,1.096v,NTC&64kLDR,LED_GndGB_A0-A2,10Kref[D6]/NTC10k[D7]/5528LDR[D9]-104cap,rail200uF,";
-//const char deploymentDetails[] PROGMEM = "MX06 1111887L,2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "MX07 1115226L,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "MX08 1118565L,2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "MX03 1121904L,2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "MX04 1105209L,2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-const char deploymentDetails[] PROGMEM = "MX05 1118565L,2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "MX02 1115470L,2.2uA sleep,4K@0x57 & 64k@0x50,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20230312";
-//const char deploymentDetails[] PROGMEM = "CL 1121904L,si7051,4k@0x57&64k@0x51,1.2uA sleep,1.096v,LED_GndGB_A0-A2,rail200uF,";
-//const char deploymentDetails[] PROGMEM = "CA 1118370L,(TESTEDok),2x64k(50&51),1.4uA,1.092v,NTC&64kLDR,LED_GndGB_A0-A2,10Kref[D6]/NTC10k[D7]/5528LDR[D9]-104cap,rail200uF,";
-//const char deploymentDetails[] PROGMEM = "CK 1125917L,si7051,4k@0x57&64k@0x51,1uA sleep,1.100v,LED_GndGB_A0-A2,rail200uF,";
+const char deploymentDetails[] PROGMEM = "1085872L,4K ONLY @0x57,10Kref[D6]/NTC[D7]/CDS[D9]-104cap,RGB a0-3,Built:20220216";
 
 #define InternalReferenceConstant 1126400L //1126400L is default value! = 1100mV internal vref * 1024 
 // adding/subtracting 400 from the constant raises/lowers the 'calculated' result from
