@@ -1643,8 +1643,8 @@ void ConditionCapacitorOnD8(){
 
   //MUST float ALL pins with resistor/sensors connected to the common capacitor
   //or you wont be able to read the others!
-  bitClear(DDRB,1);bitClear(PORTB,1);     //D9 [LDR] to INPUT(0) & LOW(0) 
-  DDRD &= B00011111;PORTD &= B00011111;   //D6 [ref],D7[NTC],D8[300Ω] to INPUT(0) & LOW(0)
+  DDRB &= B11111100; PORTB &= B11111100;   //D9[LDR] & D8[300Ω] to INPUT(0) & LOW(0) 
+  DDRD &= B00111111; PORTD &= B00111111;   //D7[NTC] & D6 [ref] to INPUT(0) & LOW(0)
   bitSet(DDRB,0); //pinMode(8,OUTPUT)
 
   set_sleep_mode(SLEEP_MODE_IDLE);// this mode leaves Timer1 running @<1mA draw but wakes in 6 clock cycles
@@ -1690,15 +1690,15 @@ uint16_t ReadD6riseTimeOnD8(){
 
   //MUST float ALL pins with resistor/sensors connected to the common capacitor
   //or you wont be able to read the others!
-  bitClear(DDRB,1);bitClear(PORTB,1);     //D9 [LDR] to INPUT(0) & LOW(0) 
-  DDRD &= B00011111;PORTD &= B00011111;   //D6 [ref],D7[NTC],D8[300Ω] to INPUT(0) & LOW(0)
+  DDRB &= B11111100;PORTB &= B11111100;   //D9[LDR] & D8[300Ω] to INPUT(0) & LOW(0) 
+  DDRD &= B00111111;PORTD &= B00111111;   //D7[NTC] & D6 [ref] to INPUT(0) & LOW(0)
+  bitSet(DDRD,6);               // D6 OUTPUT
 
 //========== read resistor RISING on D6 ===========
   set_sleep_mode(SLEEP_MODE_IDLE);
   prepareForInterrupts();
   noInterrupts(); sleep_enable();
   TCNT1 = 0;                    // reset Timer 1 counter value to 0
-  bitSet(DDRD,6);               // D6 OUTPUT
   bitSet(PORTD,6);              // D6 HIGH -> now charging the cap through 10k ref
   do{
   interrupts(); sleep_cpu(); noInterrupts();
@@ -1710,7 +1710,7 @@ uint16_t ReadD6riseTimeOnD8(){
   
     bitClear(DDRD,6); bitClear(PORTD,6); // D6 INPUT & LOW -> stops the capacitor charge
 //  discharge the capacitor through 300Ω on D8
-    bitSet(DDRB,0);bitClear(PORTB,0); //D8 OUTPUT LOW
+    bitSet(DDRB,0);//bitClear(PORTB,0); //D8 OUTPUT & already LOW
       LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);
     bitClear(DDRB,0);                 //D8 INPUT 
     
@@ -1739,14 +1739,15 @@ uint16_t ReadD7riseTimeOnD8(){
 
   //MUST float ALL pins with resistor/sensors connected to the common capacitor
   //or you wont be able to read the others!
-  bitClear(DDRB,1);bitClear(PORTB,1);     //D9 [LDR] to INPUT(0) & LOW(0) 
-  DDRD &= B00011111;PORTD &= B00011111;   //D6 [ref],D7[NTC],D8[300Ω] to INPUT(0) & LOW(0)
+  DDRB &= B11111100; PORTB &= B11111100;   //D9[LDR] & D8[300Ω] to INPUT(0) & LOW(0) 
+  DDRD &= B00111111; PORTD &= B00111111;   //D7[NTC] & D6 [ref] to INPUT(0) & LOW(0)
+  bitSet(DDRD,7); // Pin D7 OUTPUT
   
 //=== read the NTC thermistor(?) RISING on D7 ===========
   set_sleep_mode (SLEEP_MODE_IDLE); 
   prepareForInterrupts(); 
   noInterrupts(); sleep_enable(); TCNT1 = 0; // reset Timer 1
-  bitSet(DDRD,7); bitSet(PORTD,7);  // Pin D7 OUTPUT & HIGH  //now charging the cap through NTC thermistor
+  bitSet(PORTD,7);  // Pin D7 HIGH  //now charging the cap through NTC thermistor
     do{
     interrupts(); sleep_cpu(); noInterrupts();
     }while(!triggered);
@@ -1754,7 +1755,7 @@ uint16_t ReadD7riseTimeOnD8(){
     // sleep_disable() inside ISR (TIMER1_CAPT_vect)
   
     bitClear(DDRD,7);bitClear(PORTD,7);   //  D7 to INPUT & LOW
-    bitSet(DDRB,0);bitClear(PORTB,0);     //  D8 OUTPUT LOW // discharge the cap through D8
+    bitSet(DDRB,0);  //bitClear(PORTB,0);     //  D8 OUTPUT & already LOW // discharge the cap through D8
     LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);
     bitClear(DDRB,0);                     //  D8 INPUT 
 
@@ -1781,14 +1782,14 @@ uint16_t ReadD9riseTimeOnD8(){
 
   //MUST float ALL pins with resistor/sensors connected to the common capacitor
   //or you wont be able to read the others!
-  bitClear(DDRB,1);bitClear(PORTB,1);     //D9 [LDR] to INPUT(0)LOW(0) 
-  DDRD &= B00011111;PORTD &= B00011111;   //D6 [ref],D7[NTC],D8[300Ω] to INPUT(0)LOW(0)
+  DDRB &= B11111100; PORTB &= B11111100;   //D9[LDR] & D8[300Ω] to INPUT(0) & LOW(0) 
+  DDRD &= B00111111; PORTD &= B00111111;   //D7[NTC] & D6 [ref] to INPUT(0) & LOW(0)
+  bitSet(DDRB,1);            //D9 OUTPUT 
 
 //=== read the D9 resistance RISING on D8 ===========
   set_sleep_mode (SLEEP_MODE_IDLE);
   prepareForInterrupts();
   noInterrupts(); sleep_enable(); TCNT1 = 0;
-  bitSet(DDRB,1);            //D9 OUTPUT 
   bitSet(PORTB,1);           //D9 HIGH
      do{
      interrupts(); sleep_cpu(); noInterrupts();
@@ -1797,7 +1798,7 @@ uint16_t ReadD9riseTimeOnD8(){
   interrupts(); //sleep_disable(); // redundant:  sleep_disable() in ISR (TIMER1_CAPT_vect)
 
   bitClear(DDRB,1); bitClear(PORTB,1);  //  D9 INPUT & LOW // stops capacitor charging
-  bitSet(DDRB,0);bitClear(PORTB,0);     //  D8 OUTPUT LOW  // discharge the capacitor through D8
+  bitSet(DDRB,0);  //bitClear(PORTB,0);     //  D8 OUTPUT & already LOW  // discharge the capacitor through D8
   LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF); 
   bitClear(DDRB,0);                     //  D8 INPUT 
 
