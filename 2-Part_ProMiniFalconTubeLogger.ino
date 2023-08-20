@@ -1560,11 +1560,10 @@ void Write_i2c_eeprom_array( uint8_t deviceAddress, uint16_t registerAddress_16b
     power_adc_enable();   // Aref rise takes ~1msec, while it takes 5msec or more for Aref to fall.
     ADCSRA = set_ADCSRA; ADMUX = set_ADMUX; // NOTE: prescalar was changed in SETUP - so we need to set the one we want now
             // Default ADC read takes 13 ADC clock cycles, so default is about 9615 Hz (or 0.104 milliseconds per reading).
-            // bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,0); // DEFAULT ADC CLOCK with 64 prescalar @ 8MHz/64 = 125 kHz ADC clock  takes ~104uS/ADC reading
-    bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,1); // 128 prescalar SLOWS THE ADC to 1/2 speed @ 8MHz/64 = 62.5khz kHz, takes ~208uS / ADC read
-    //I'm slowing the ADC clock so the ADC read loop cycles fewer times during the eeprom write (ie: spends more time sleeping)
-    bitSet(ADCSRA,ADSC); //while(bit_is_set(ADCSRA,ADSC)); // trigger ADC reading
- 
+  bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,0);   // 64 (default) prescalar @ 8MHz/64 = 125 kHz, =~104uS/ADC reading
+  bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));  // trigger a THROW AWAY reading to engage the AREF capacitor
+  LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_ON);       // Aref Capacitor Rise time & battery recovery before eeprom write
+
 // 4k AT24c32 writes for 10ms @3mA, but newer eeproms can take only only 5ms @3mA
     Wire.beginTransmission(deviceAddress);
     Wire.write((byte)((registerAddress_16bit) >> 8));   // send the MSB of the address
@@ -1572,47 +1571,23 @@ void Write_i2c_eeprom_array( uint8_t deviceAddress, uint16_t registerAddress_16b
        for (int i=0; i<numOfBytes; i++) {
           Wire.write((byte)arrayPointer[i]);
        }      
-    Wire.endTransmission();
-           
-    power_timer0_disable(); 
-    power_twi_disable(); //more current reduction
-
+    Wire.endTransmission();    
+    delayMicroseconds(3);
+    
 // Measuring the internal 1.1v ref using Vcc as the ADC reference -ie: the int  voltage is the ADC INPUT
 // So an INVERSE relationship: as rail voltage falls the ADC reading increases.
-// we will ignore the first few readings to give the AREF cap ~3 msec to stabilize 
-  uint16_t NEWadcReading; uint16_t LOWESTpoint = 0; 
-  bitSet(ADCSRA,ADIE);  // generate interrupt when the ADC conversion is done
-  set_sleep_mode(SLEEP_MODE_ADC); //stops CPU to lower current draw but allows ADC peripheral
-  uint8_t loopCounter = 0;
-     
-     do{ //at default ADC clock each reading takes ~104uS/ADC  // eeprom write takes 10ms
-            bitSet(ADCSRA,ADSC);  //trigger a new reading
-            sleep_enable(); // Enable Noise Reduction Sleep Mode
-                do{ 
-                    interrupts();   // always use sei immediately followed by sleep_cpu 
-                    sleep_cpu();    // + 6 clock cycles to wake from SLEEP_MODE_ADC
-                    noInterrupts(); // Check conversion status done w interrupts disabled to avoid race condition
-                  }while (bit_is_set(ADCSRA,ADSC)); // the ADC clears the bit when conversion is complete 
-            sleep_disable();
-            interrupts();
-            byteBuffer1= ADCL; byteBuffer2 = ADCH;// read low first
-            NEWadcReading= ((byteBuffer2 << 8)|byteBuffer1); 
-            if(loopCounter>16){ // ignores the first 16 readings to Aref capacitor voltage stabilization time
-              if(NEWadcReading>LOWESTpoint){LOWESTpoint=NEWadcReading;}  // yes, the relationship is inverse
-            }
-            loopCounter++;
-       }while(loopCounter<32); // number of ADC reads should roughly match your expected eeprom writing time
-       // use 50 loops @ 208uS/read for 4K because slow 4K eeproms take 10msec/write
-       // but faster 64k eeproms usually need only need 6mSec for EE write so loop limit can be 32
 
-  bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,0); // back to default ADC clock speed
-  bitClear(ADCSRA,ADIE);     // turn off ADC interrupts
-  power_adc_disable();  // turn off ADC
-  LowPower.powerDown(SLEEP_120MS, ADC_ON, BOD_OFF);   // coin cell battery recovery time                                                                 // sleep_disable(); taken care of in LowPower.powerDown
-  power_timer0_enable();   // Timer0 is required for I2C, delay, serial print, etc
-  power_twi_enable();      // enable I2C bus
-  
-  currentBatteryRead = InternalReferenceConstant / LOWESTpoint; // LONG calc forced by InternalReferenceConstant = 630 cpu clocks! do this after restoring 8MHz
+    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));//throw away first
+    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));uint16_Buffer = ADC; 
+    ADCSRA = 0; power_adc_disable();
+    
+    if(sensorEEbytesOfStorage==4096){  // battery recovery time from EEprom save event
+      LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF); // LowPower.idle is not compatible with 4K eeproms! // also WORKS with THE 4k eeproms: LowPower.adcNoiseReduction(SLEEP_15MS, ADC_OFF, TIMER2_OFF);
+    } else { // larger 32& 64k eeproms are only stable with sleep mode IDLE while eeprom is writing data
+      LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_ON);
+    }
+ 
+  currentBatteryRead = InternalReferenceConstant / uint16_Buffer; // LONG calc forced by InternalReferenceConstant = 630 cpu clocks! do this after restoring 8MHz
   TWBR=2; //back to 400KHz bus for RTC coms - only 4k eeprom needs slower I2C bus
   if (currentBatteryRead < LowestBattery) {LowestBattery = currentBatteryRead;}
   newBatteryReadReady=true; // this flag only gets used if SaveBatteryEveryCycle = true;
