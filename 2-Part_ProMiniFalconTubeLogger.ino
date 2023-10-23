@@ -1,46 +1,53 @@
-// Cave Pearl Project 2-Part logger code by Edward Mallon - modified for e360 course at N.U.
+// Cave Pearl Project 2-Part logger code by Edward Mallon - modified 2023 for e360 course at N.U.
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
 /*
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from the Cave Pearl Project. 
 The goal is to provide a starting point for self-built student projects in environmental monitoring courses.
 This low power 2-module iteration runs from a CR2032 coin cell and uses EEprom memory to store sensor readings. 
 Data download & logger control are managed through the IDE's serial monitor window at 500000 baud. 
-The logger WILL NOT START until those serial handshakes are completed with a UART connection.
+The logger WILL NOT START until those serial handshakes are completed via a UART connection.
 The most important rule to follow when adding new sensors is that code can only accept 1, 2, 4, 8 or 16 bytes per record.
-These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms hardware page size to prevent page wrap arounds.
+These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms hardware page size to prevent page wrap-arounds.
 */
 
 #include <Wire.h>       // I2C bus coms library: RTC, EEprom & Sensors
 #include <EEPROM.h>     // note: requires default promini bootloader (ie NOT optiboot)
-#include <avr/power.h>  // for shutting down peripherals to lower runtime current
-#include <avr/sleep.h>  // used in readBattery() function
+#include <avr/power.h>  // library for shutting down 328p chip peripherals to lower runtime current
+#include <avr/sleep.h>  // provides SLEEP_MODE_ADC to lower current during ADC readings in readBattery() function
 #include <LowPower.h>   // for interval & battery recovery sleeps
 
 // LOGGER OPERATING PARAMETERS:  Adjust the following variables to suit your build!
 //---------------------------------------------------------------------------------
-const char loggerConfiguration[] PROGMEM = "1112159,John Smiths e360 logger,4k,1.086vref,NTC[7]&LDR[6]NOref104cap,LED_r9_b10_g11_gnd12";
+const char loggerConfiguration[] PROGMEM = "John Smiths e360 logger,1126400,1.100vref,4kEEprom,NTC[7]&LDR[6]NOref104cap,LED_r9_b10_g11_gnd12";
 const char deploymentDetails[] PROGMEM = "Description of the current deployment";
-                                              // Populate the variables above with information about your logger
+                                        // Populate the variables above with information about your logger
 
-int32_t InternalReferenceConstant = 1126400;  // default = 1126400L = 1100mV internal vref * 1024
-                                              // gets changed manually in setup via serial menu input option OR
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP0 :  OPTIONAL:
+// Create SENSOR definitions HERE to match the sensors you added to the logger
+// Use these to enable code sections with #ifdef & #endif statements in the rest of the program
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// for example:
+
+#define LogLowestBattery        // 2-bytes: saves LowestBattery recorded during operation
+//#define Si7051_Address 0x40   // 2-bytes: NOTE the si7051 is often used for NTC calibration
+
+#define LED_r9_b10_g11_gnd12    // enables code for RGB indicator LED (if attached) - Red LED on D13 gets used if #define LED_r9_b10_g11_gnd12 is commented out
+
+
+// Ref, Sampling Interval & Echo can be reset via serial monitor input - so the values here don't matter
+//----------------------------------------------------------------------------------------------
+int32_t InternalReferenceConstant = 1126400;  // default = 1126400L = 1100mV internal vref * 1024 // gets changed in setup via serial menu input option later
                                               // adding/subtracting 400 from the constant raises/lowers the 'calculated' result from readBattery() by ~1 millivolt,
                                               // simply read the rail with a DVM while running on UART power and change the constant until the calculation is accurate
-
-uint8_t SampleIntervalMinutes = 15;   // Allowed values: 1,2,3,5,10,15,20,30 or 60 - must divide equally into 60!
-uint8_t SampleIntervalSeconds = 0;    // minutes must be zero for intervalseconds, used for rapid burn tests only
+uint8_t SampleIntervalMinutes = 15;   // Allowed values: 1,2,3,5,10,15,20,30 for both- must divide equally into 60!
+uint8_t SampleIntervalSeconds = 0;    // minutes must be zero for intervalseconds, seconds must be zero for intervalMinutes
                                       // NOTE: Make sure your sensor readings don't take longer than your sample interval!
                                       // If you over-run your next alarm you will have to wait 24hours for next wakeup
 
 bool ECHO_TO_SERIAL = false;      // ONLY enable this 'true' for debugging when tethered to USB! enables multiple print statements throughout the code  // also starts the run with no interval sync delay so timestamps are misaligned
-
-#define LED_r9_b10_g11_gnd12      // since we added an extra indicator LED Red LED on D13 gets used if #define LED_r9_b10_g11_gnd12 is commented out
-
-// Create SENSOR definitions HERE to match your loggers configuration: 
-// Use these to enable the necessary additions with #ifdef & #endif statements throughout the program
-
-#define LogLowestBattery        // 2-bytes: saves LowestBattery recorded during operation
-//#define Si7051_Address 0x40   // 2-bytes: NOTE the si7051 is generally only used for NTC calibrations
 
 // VARIABLES below this point stay the SAME on all machines:
 //---------------------------------------------------------------------------
@@ -72,15 +79,14 @@ volatile uint8_t adc_interrupt_counter;// incremented in readADCLowNoise ISR to 
 #define DS3231_STATUS_REG  0x0F     // reflects status of internal operations
 #define DS3231_CONTROL_REG 0x0E     // enables or disables clock functions
 #define DS3231_TMP_UP_REG  0x11     // temperature registers (upper byte 0x11 & lower 0x12) gets updated every 64sec
+#define AlarmSelectBits 0b00001000  // set bits to 0b1000 to use alarm 1 and bits = 0b0111 to use alarm 2
 
 uint32_t loggerStartTime;           // uint32_t is large enough to hold the 10-digit unixtime number
 char CycleTimeStamp[] = "0000/00/00,00:00"; //16 character array to store human readble time (without seconds)
 uint8_t t_second,t_minute,t_hour,t_day,t_month; // current time variables populated by calling RTC_DS3231_getTime()
-uint8_t Alarmday,Alarmhour,Alarmminute,Alarmsecond,AlarmSelectBits; // calculated variables for setting next alarm
 uint16_t t_year;                    //current year //note: yOff = raw year to which you need to add 2000
-float rtc_TEMP_degC = 0.0;
-int16_t rtc_TEMP_integer = 0; 
-volatile boolean rtc_INT0_Flag = false;  // volatile because it's changed in an ISR // rtc_d2_alarm_ISR() sets this boolean flag=true when RTC alarm wakes the logger
+uint8_t Alarmday,Alarmhour,Alarmminute,Alarmsecond; // calculated variables for setting next alarm
+volatile boolean rtc_INT0_Flag = false;  // used in startup time sync delay //volatile because it's changed in an ISR // rtc_d2_alarm_ISR() sets this boolean flag=true when RTC alarm wakes the logger
 
 // temporary 'buffer' variables only used during calculations
 //------------------------------------------------------------------------------
@@ -93,9 +99,12 @@ uint16_t uint16_Buffer= 9999;   // 2-byte from 0 to 65535
 uint32_t uint32_Buffer= 9999;   // 4-byte from 0 to 4,294,967,295
 float floatBuffer = 9999.9;     // for float calculations
 
-//--------------------------------------------------------------------------------
-// variables for sensors attached: Wrapped in #ifdef / #endif statements
-//--------------------------------------------------------------------------------
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP1 :  #include sensor libraries & create GLOBAL sensor variables HERE
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 #ifdef Si7051_Address 
 //------------------------------------------------------------------------------
@@ -111,13 +120,15 @@ float floatBuffer = 9999.9;     // for float calculations
 //======================================================================================================================
 //======================================================================================================================
 //======================================================================================================================
-// NOTE: problems in setup usually call the error() function which shuts down the logger
+// NOTE: problems in setup usually call the error_shutdown() function which shuts down the logger
 
 void setup () {
 
-//=========================================================================================
-// Adjust the bytesPerRecord variable to match the #bytes saved at each sampling interval
-//=========================================================================================
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP2 : Adjust the bytesPerRecord variable to match the #bytes saved at each sampling interval
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
   #ifdef LogLowestBattery
     bytesPerRecord +=2;   // two byte integer
@@ -275,59 +286,73 @@ do { command = Serial.readStringUntil('\n');    // read serial monitor data into
 
 if (!goFlagReceived){   // if goflag=false then the loop timed out so shut down the logger
       Serial.println(F("Timeout with NO command recieved -> logger shutting down"));Serial.flush();
-      error();          // shut down the logger
+      error_shutdown();          // shut down the logger
 }
 
 
 //========================================================================================
 Serial.print(F("Initializing sensors "));
 //========================================================================================
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP3 : Initialize your sensor (if needed)
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // this is where you could configure your control registers & usually take a first reading if its a sensor
 // usualy wrapped with #ifdef Sensor_Address  ... #endif statements
 // for example: 
 
-CurrentBattery = readBattery(); 
-
-#ifdef Si7051_Address             // using functions at the end of this program
-  initSI7051();  // see function at the end of this program
-  Serial.println(F("Si7051 started"));Serial.flush();
+#ifdef Si7051_Address
+  initializeSI7051(); // we are not using a library so you can scroll down to read this function at the end of this program
+  // if that function was in an #included library it would usually have an object .prefix something like:  si7051.initialize()
+  Serial.println(F("Si7051 started"));Serial.flush();  // if you see this message in the serial monitor you know the sensor did not hang the machine...
 #endif
+
+/* as another example, if the oled was connected you would do this kind of startup configuration here:
+#ifdef OLED_64x32_SSD1306
+  oled.begin(&Adafruit128x64,oled_I2C_Address);
+  oled.setFont(System5x7);
+  oled.setContrast(64); //The contrast level -range 0 to 255. 
+  oled.clear();
+  oled.ssd1306WriteCmd(SSD1306_DISPLAYOFF);
+#endif
+*/
+
 
 //========================================================================================
 Serial.println(F("& Starting the logger:"));Serial.flush();
-
 //========================================================================================
-// FINAL STARTUP PROCEDURE: is to DELAY START of the logger until 1st sampling alarm is in sync
+// FINAL STARTUP PROCEDURE: is to DELAY the logger until 1st sampling alarm is synchronized
 // otherwise you might get a "clipped interval" at the first hour rollover
 //========================================================================================
 // ALSO saves logger startup time to 328p internal EEprom WHILE tethered to UART for power
-// the saved startup time is used later when setup_sendSensorData2Serial reconstructs TimeStamps during download
+// the saved startup time is used later when startMenu_sendData2Serial reconstructs TimeStamps during data download
 //========================================================================================
 
   RTC_DS3231_getTime();    // this function populates the global variables t_day, t_hour, etc.
  
 if(ECHO_TO_SERIAL){        // if ECHO is on you are in debug mode so the regular time sync delay is skipped when sample interval is minutes
 //----------------------------------------------------------------------------------------------------------------------------------------
- 
-    uint32_t timeCalcVariable = RTC_DS3231_unixtime(); //returns date/time as single unixtime long integer
-    Serial.println(F("ECHO_TO_SERIAL is ON: Sync delay disabled."));Serial.println();Serial.flush();    
+    Serial.println(F("ECHO_TO_SERIAL is ON: Sync delay disabled."));Serial.println();Serial.flush();   
+    uint32_t timeCalcVariable = RTC_DS3231_unixtime(); //returns date/time as single unixtime long integer // must call RTC_DS3231_unixtime - AFTER - _getTime updates the global t_ variables 
     
-    integerBuffer=0;
-      if(SampleIntervalMinutes==0){     // we will add brief delay for seconds-only intervals
+    integerBuffer=0; // we add a very brief delay for seconds-only intervals until sample interval divides evenly into current minute
+      if(SampleIntervalMinutes==0){     
          if(SampleIntervalSeconds>1){
             integerBuffer = SampleIntervalSeconds - (t_second % SampleIntervalSeconds); // % = modulo = remainder after division
-            delay(integerBuffer*1000);  // delay (the remainder) seconds until sample interval divides evenly into current time
+            delay(integerBuffer*1000);
          } else {                       // if sample interval seconds is 1 we delay for 3 seconds because remainder calculation fails
           integerBuffer = 3;
           delay(3000);
           }
       }
     loggerStartTime = timeCalcVariable + integerBuffer;   //= RTC_DS3231_unixtime();
+    
     EEPROM.put(0,loggerStartTime); // our time-index value gets stored at memory location 0 in the internal eeprom  .put handles all 4 bytes of the long integer
 
-}else{ 
-  // if ECHO_TO_SERIAL is false we are not debugging so delay logger startup until our sampling interval divides evenly into current time
-  //---------------------------------------------------------------------------------------------------------------------------------------------------- 
+}else{  // if ECHO_TO_SERIAL is false we are not debugging so use a longer startup delay until our sampling interval divides evenly into current time
+//---------------------------------------------------------------------------------------------------------------------------------------------------- 
 
   Alarmday = t_day; Alarmhour = t_hour; Alarmsecond = 0; 
   // Alarmminute = gets calculated and we check for rollovers
@@ -336,15 +361,13 @@ if(ECHO_TO_SERIAL){        // if ECHO is on you are in debug mode so the regular
         Alarmminute=t_minute+2;     // the delay becomes remainder of current minute + 1 minute
   } else {  //  SampleIntervalMinutes>0  (the normal default)
         Alarmminute=((t_minute/SampleIntervalMinutes)*SampleIntervalMinutes) + (2*SampleIntervalMinutes); 
-        // last aligned time + 1 sample interval = NEXT alignment time,  PLUS  one 'extra' SampleInterval added
-  }     // end if(SampleIntervalMinutes==0)
+        // =previous aligned time + 1 sample interval = NEXT alignment time -PLUS- one 'extra' SampleInterval added
+  }     // terminates if(SampleIntervalMinutes==0)
 
-  if (Alarmminute > 59) { // checking for Alarmminute roll-over //can result in start delays clipped due to sminutes =0
-     Alarmminute = 0; Alarmhour = Alarmhour + 1; //this line does not work with SampleIntervalMinutes =60
+  if (Alarmminute > 59) { // checking for Alarmminute roll-over //can result variable delay times depending on start
+     Alarmminute = SampleIntervalMinutes;  Alarmhour = Alarmhour + 1;
         if (Alarmhour > 23) {
           Alarmhour = 0; 
-          Alarmday = Alarmday + 1;  // but setAlarm1Simple has no days input?
-                                    // what about month rollovers?
         }
    }
 
@@ -357,21 +380,21 @@ if(ECHO_TO_SERIAL){        // if ECHO is on you are in debug mode so the regular
   attachInterrupt(0,rtc_d2_alarm_ISR, LOW); // RTC SQW alarms LOW and is connected to pin D2 which is interupt channel 0
   interrupts ();
 //---------------------------------------------------------------------------------------------- 
-// calculate and save the unix time for the alarm we just programmed // this is the same calculation used in function: RTC_DS3231_unixtime():
+// calculate and save UNIXtime for the alarm we just programmed // this is the same calculation used in function: RTC_DS3231_unixtime():
 // but we are doing it here because UART is still connected to supply power for the save - internal eeprom saving draws alot of current (8mA for EEprom + 5mA for ProMini)
-  uint16_Buffer = date2days(t_year, t_month, Alarmday); // the days calculation
-  uint32_Buffer = time2long(uint16_Buffer, Alarmhour, Alarmminute, Alarmsecond);
+  uint16_Buffer = rtc_date2days(t_year, t_month, Alarmday); // the days calculation
+  uint32_Buffer = rtc_time2long(uint16_Buffer, Alarmhour, Alarmminute, Alarmsecond); // convert that to seconds
   uint32_Buffer += 946684800;       // add # seconds from 1970 to 2000 which is the delta between Unixtime start & our RTC's internal time start
-  loggerStartTime = uint32_Buffer;  // this will be the unixtime when we wake AFTER the sync delay
-  EEPROM.put(0,loggerStartTime);    // store this so it can be used reconstructing timestamps in the setup_sendSensorData2Serial() function in future
+  loggerStartTime = uint32_Buffer;  // this will be the unixtime when we wake AFTER the sync delay is over
+  EEPROM.put(0,loggerStartTime);    // store this so it can be used reconstructing each records timestamp in the startMenu_sendData2Serial() function later
 //------------------------------------------------------------------------------  
   Serial.println(F("Red ( & Blue ) LEDs will now flash @1sec until the logger takes 1st reading")); Serial.flush();
   
   if(!ECHO_TO_SERIAL){          // if it's not being used, shut down the UART peripheral now to save power
     Serial.println(F("Disconnect UART now - NO additional messages will be sent over serial.")); Serial.flush();
     power_usart0_disable();     // we waited until this point because the startup input menu requires serial input via the UART
-    digitalWrite(0, LOW);  pinMode(0, OUTPUT); // digital pins 0(RX) and 1(TX) are connected to the UART peripheral inside the 328p chip
-    digitalWrite(1, LOW);  pinMode(1, OUTPUT); // Connecting anything to these pins may interfere with serial communication, including causing failed uploads
+    // digital pins 0(RX) and 1(TX) are connected to the UART peripheral inside the 328p chip
+    // Connecting anything to these pins may interfere with serial communication, including causing failed uploads
   }
 //------------------------------------------------------------------------------
 // FIRST sampling wakeup alarm is already set But instead of simply going to sleep we will use LowPower.powerDown SLEEP_1S
@@ -380,26 +403,26 @@ if(ECHO_TO_SERIAL){        // if ECHO is on you are in debug mode so the regular
       pinMode(10,INPUT_PULLUP); // D10 [Blue] LED INPUT & PULLUP ON
       pinMode(13,INPUT);        // D13 onboard red LED INPUT with PULLUP OFF  
   #endif
-
+  rtc_INT0_Flag=false;          // flag variable only becomes 'true' when RTC alarm triggers execution of rtc_d2_alarm_ISR
   do{     // see a ProMini pin map to understand why we are using PINB here for the LED controls https://images.theengineeringprojects.com/image/webp/2018/06/introduction-to-arduino-pro-mini-2.png.webp?ssl=1
-        #ifdef LED_r9_b10_g11_gnd12
-          PINB = B00100100;               // setting any bits in the 328p PIN control registers to 1 TOGGLES the PULLUP RESISTOR on the associated pins
+        #ifdef LED_r9_b10_g11_gnd12       // setting any bits in the 328p PIN control registers to 1 TOGGLES the PULLUP RESISTOR on the associated pins
+          PINB = B00100100;               // this toggles both blue & the D13 led
         #else
           PINB = B00100000;               // this toggles ONLY the D13 led // ~50uA to light RED onboard led through D13s internal pullup resistor
         #endif 
         LowPower.powerDown(SLEEP_1S, ADC_ON, BOD_OFF);   //ADC_ON preserves the existing ADC state - if its already off it stays off
-    }while(!rtc_INT0_Flag);               // flag variable only becomes 'true' when RTC alarm triggers execution of rtc_d2_alarm_ISR
+    }while(!rtc_INT0_Flag);               // sends you back to do{ unless the RTC alarm has triggered
     
       pinMode(13,INPUT);                  // D13 [red] indicator LED PULLUP OFF   // alt:  bitClear(PORTB,5); would also do this job
       pinMode(10,INPUT);                  // D10 [Blue] LED PULLUP OFF            // alt:  bitClear(PORTB,2);
 
   RTC_DS3231_turnOffBothAlarms();         // Note: detachInterrupt(0); was already done inside the rtc_d2_alarm_ISR 
 
-  } //terminates if(ECHO_TO_SERIAL){
+} //terminates if(ECHO_TO_SERIAL){ synchronization time delay -we are now ready to start logging
 
 //==========================================================================================
-//==========================================================================================
 }  // terminator for void setup()
+//==========================================================================================
 
 
 //==========================================================================================
@@ -413,9 +436,11 @@ if(ECHO_TO_SERIAL){        // if ECHO is on you are in debug mode so the regular
 
 void loop(){
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//------------------------------------------------------------------------------- 
+//------------------------------------------------------------------------------- 
 //  *  *  *  *  Set the next RTC wakeup alarm  *  *  *  *  *  *
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//------------------------------------------------------------------------------- 
+//-------------------------------------------------------------------------------    
    RTC_DS3231_getTime();
    LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF); // short sleeps for Cr2032 battery recovery after EVERY I2C exchange
    
@@ -426,8 +451,7 @@ void loop(){
     Alarmminute = t_minute + SampleIntervalMinutes; //Alarmminute = now.minute()+SampleIntervalMinutes; 
     Alarmsecond = t_second + SampleIntervalSeconds; //only used for special testing & debugging runs - usually gets ignored
 
-// Check for TIME ROLLOVERS: THEN SET the next RTC alarm
-//------------------------------------------------------------------------------
+// Check for TIME ROLLOVERS: before SETTING the next RTC alarm
 if (SampleIntervalMinutes > 0)  //when our interval alarm is in minutes
     {
       if (Alarmminute > 59) {         //error catch - if alarmminute=60 or greater the interrupt will never trigger
@@ -457,12 +481,12 @@ else    //to get sub-minute alarms use the full setA1time function
       }
       
       //function expects: (byte A1Day, byte A1Hour, byte A1Minute, byte A1Second, byte AlarmSelectBits, bool A1Dy, bool A1h12, bool A1PM)
-      AlarmSelectBits=0b00001000;       // ALRM1_SET bits and ALRM2_SET are 0b1000 and 0b0111 respectively.
       RTC_DS3231_setA1Time(Alarmday, Alarmhour, Alarmminute, Alarmsecond, AlarmSelectBits, false, false, false);
       LowPower.powerDown(SLEEP_120MS, ADC_ON, BOD_OFF);  // RTC memory register WRITING time & battery recovery time
 } // terminator for second else case of if (SampleIntervalMinutes > 0) 
     
   RTC_DS3231_turnOnAlarm(1);
+  
   if(ECHO_TO_SERIAL){
       sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute);
       Serial.println(); Serial.print(F(">Logger woke at: ")); Serial.print(CycleTimeStamp); // sprintf ref:  http://www.perlmonks.org/?node_id=20519
@@ -471,18 +495,17 @@ else    //to get sub-minute alarms use the full setA1time function
       Serial.print(SampleIntervalSeconds);Serial.println(F("s")); Serial.flush();
     }
 
-  CurrentBattery = readBattery(); // Note: SLEEP_15MS embedded in readBattery function
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP4 : READ your sensors here
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+CurrentBattery = readBattery();   // Note: a SLEEP_15MS is embedded in the readBattery function
     if(ECHO_TO_SERIAL){           // readBat does not usually set LObat which generally happens during high current drain EEsave at end of main loop
-      Serial.print(F(", Current Bat[mV]: "));Serial.print(CurrentBattery);
+      Serial.print(F(", Current Bat[mV]: "));Serial.print(CurrentBattery);Serial.flush();
     }
-
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-// *  *  *  *  READ your sensors here -AFTER- wake-up alarm set!  *  *  *  *  *
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-
+    
 #ifdef Si7051_Address
 //------------------------------------------------------------------------------
     TEMP_si7051 = readSI7051();  // see functions at end of this program
@@ -493,9 +516,10 @@ else    //to get sub-minute alarms use the full setA1time function
 #endif
 
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+//---------------------------------------------------------------------------------
 // HEARTBEAT pip of the LED at the end of the senor readings // draws 30-50uA
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
+//---------------------------------------------------------------------------------
 // also provides some battery recovery time before data is saved to EEprom
 
     #ifdef LED_r9_b10_g11_gnd12
@@ -508,16 +532,16 @@ else    //to get sub-minute alarms use the full setA1time function
     pinMode(13,INPUT); // pin13 indicator LED pullup Off
 
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//  *  *  *  SAVE NEW SENSOR READINGS into EEprom & READ battery after *  *  *  *
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//---------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------
+//  SAVE NEW SENSOR READINGS into EEprom & READ battery after
+//---------------------------------------------------------------------------------
+//---------------------------------------------------------------------------------
 // the number of bytes you transfer here must match the number in bytesPerRecord
 // AND bytes written to per cycle MUST divide evenly into the eeproms pagesize
 // So each cycle can only add 1,2,4,8 or 16 bytes - not 3 , not 5, not 7 etc. 
 // or you bork the 'powers of 2' math required by page boundaries in the EEprom
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//---------------------------------------------------------------------------------
 //  the general pattern when sending bytes to store in an I2C eeprom:
 
 //  Wire.beginTransmission(EEpromAddressonI2Cbus);  // first byte in I2C buffer
@@ -525,38 +549,40 @@ else    //to get sub-minute alarms use the full setA1time function
 //  Wire.write(memoryeeAddress & 0b11111111);       // LSB is third byte
 //    Wire.write(byte);       // adds 1st byte of SAVED data to buffer
 //    Wire.write(byte);       // adds 2nd byte of SAVED data to buffer
-//   -multiple wire.writes-   // CONTINUE adding to 16 DATA bytes per record -divide the sensor variables up into individual bytes for sending
-//  Wire.endTransmission();   // Only when this command executes does the data get sent over the I2C bus
+//   -more wire.writes-   // CONTINUE adding up to 16 DATA bytes per record - divide the sensor variables up into individual bytes for sending
+//  Wire.endTransmission();   // Only when this command executes does the I2C memory buffer get sent over the I2C bus
 
   // beginTransmission() and write() are slightly misleading terms, they do NOT send commands/packets to the I2C device. 
   // They are simply queuing commands, which means they are adding bytes to an internal buffer in the Wire/TWI library. 
   // This internal buffer is not sent to the I2C device on the bus until end.Transmission() is called 
   // estimate about 100us per byte at 100khz bus = 0.7milliseconds for 3(adr)+4(payload) bytes
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//---------------------------------------------------------------------------------
 
 
-// Setup ADC to read the coincell voltage DURING the EEprom data save:
+// FIRST Setup ADC to read the coincell voltage DURING the EEprom data save:
   power_adc_enable();
-    ADMUX = set_ADMUX_2readRailVoltage; ADCSRA = set_ADCSRA_2readRailVoltage; 
-    bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,1);   // 128 prescalar =67 kHz, = slower than normal ~208uS/ADC readings 
-    bitSet(ADCSRA,ADSC);                                  // trigger a 1st throw-away ADC reading to engauge the Aref capacitor //1st read takes 20 ADC clock cycles instead of usual 13
+    ADMUX = set_ADMUX_2readRailVoltage; ADCSRA = set_ADCSRA_2readRailVoltage;   //configure the 2 ADC control registers ADMUX & ADCSRA by loading the byte pattern from variables
+    bitWrite(ADCSRA,ADPS2,1);bitWrite(ADCSRA,ADPS1,1);bitWrite(ADCSRA,ADPS0,1); //ADC speed: 128 prescalar =67 kHz, this is slower than normal! ~208uS /ADC readings 
+    bitSet(ADCSRA,ADSC); // triggers a 1st throw-away ADC reading to engauge the Aref capacitor //1st read takes 20 ADC clock cycles instead of usual 13
   
   LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);        // Aref Rise time can take 5-10 milliseconds after re starting the ADC so 15ms of ADC_ON powerDown sleep works ok!
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-  Wire.beginTransmission(EEpromI2Caddr);  // Starts filling the I2C transmission buffer:
-  Wire.write(highByte(EEmemoryPointr));   // send the HighByte of the address
-  Wire.write(lowByte(EEmemoryPointr));    // send the LowByte of the address    // Note: EEmemoryPointr gets advanced at the end of the main loop  
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//---------------------------------------------------------------------------------
+  Wire.beginTransmission(EEpromI2Caddr);  // STARTS filling the I2C transmission buffer with the eeprom I2C bus address
+  Wire.write(highByte(EEmemoryPointr));   // send the HighByte of the EEprom memory location we want to write to
+  Wire.write(lowByte(EEmemoryPointr));    // send the LowByte of the EEprom memory location   // Note: we add  'bytes per record' to EEmemoryPointr at the end of the main loop  
+//---------------------------------------------------------------------------------
+
 // NOW load the sensor variables - one byte at a time - into the I2C transmission buffer with Wire.write statements
-// ORDER listed here MUST EXACTLY MATCH the order of the bytes retrieved in setup_sendSensorData2Serial function
+// ORDER of loading here MUST EXACTLY MATCH the order of the bytes retrieved in the startMenu_sendData2Serial function
 // ALSO NOTE we are using ZEROs as our END OF FILE marker to stop the download ( this is why we filled the eeprom with zeros at startup)
-// So we must implement a 'zero trap' on first byte of each record and bump it to '1' if it actualy was zero - this occasionally causes a data error
+// So we must implement a 'zero trap' on very first byte of each record, bumping it to '1' if it actualy was zero - this occasionally causes a data error
+
 
 #ifdef LogLowestBattery                       // INDEX compression converts battery reading to # less than 255 which can be stored in one byte eeprom memory location
 //----------------------------------------------------------------------------------------------------
-  byteBuffer1 = lowByte(LowestBattery);
-  if(byteBuffer1<1){byteBuffer1=1;}           // First data saved in record must have Zero Trap to preserve zero EOF indicators in EEprom
+  byteBuffer1 = lowByte(LowestBattery);       // note: we save the low byte first because it is almost never zero
+  if(byteBuffer1<1){byteBuffer1=1;}           // First data byte saved in each record must have a ZERO TRAP to preserve zero EOF indicators in EEprom
         Wire.write(byteBuffer1);              // first byte added to I2C buffer
   byteBuffer2 = highByte(LowestBattery);
         Wire.write(byteBuffer2);              // 2nd byte of data added to I2C buffer
@@ -565,45 +591,48 @@ else    //to get sub-minute alarms use the full setA1time function
 #ifdef Si7051_Address
 //------------------------------------------------------------------------------
   byteBuffer1 = lowByte(TEMP_si7051);   //NOTE TEMP_si7051 overruns this uint16_t if temps >40C!
-  //if(byteBuffer1==0){byteBuffer1=1;}   // note the zero trap is only necessary here if the si7051 is the first/only sensor data being saved
         Wire.write(byteBuffer1);
   byteBuffer2 =  highByte(TEMP_si7051); 
         Wire.write(byteBuffer2);
 #endif 
 
-// ---------------- add more sensor data here as required -----------------
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP5 : add more sensor data bytes to the I2C buffer HERE as required ++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    Wire.endTransmission(); // ONLY AT THIS POINT do the bytes accumulated in the I2C buffer actually get sent over the wires
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//-------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------
+    Wire.endTransmission(); // ONLY AT THIS POINT do the bytes accumulated in the buffer actually get sent
+//-------------------------------------------------------------------------------
 // Then the EEPROM enters an internally-timed write cycle to memory which takes ~3-10ms
 // 4k AT24c32 write draws ~10mA for about 10ms @3mA, but newer eeproms can take only only 5ms @3mA
-// the coincell battery experiences a significant voltage droop from its internal resistance under this load
+// the coincell battery experiences a SIGNIFICANT VOLTAGE DROP due to its internal resistance during this load
 // so we read the battery voltage during this load event for a true Li battery reading
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//-------------------------------------------------------------------------------
 
-    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));  // this is another throw away ADC reading
-    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));  uint16_Buffer=ADC; //ADC a macro command that combines the peripherals two output registers into one integer
-    ADMUX = default_ADMUX; ADCSRA = 0; power_adc_disable(); // restore defaults & turn off the ADC peripheral
+    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));  // this is another throw away ADC reading to provide 200microseconds for the coincell volatage drop
+    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC));  uint16_Buffer=ADC; //ADC is a macro command that combines the ADC's two output memory registers into one integer
+    ADMUX = default_ADMUX; ADCSRA = 0; power_adc_disable(); // restore defaults & turn off the ADC
 
     LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF); // now shut down the processor and let the battery recover from the EEprom save event 
-    // NOTE .powerDown ONLY works with the 4K eeproms -larger eeproms require the bus to keep running with: LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_ON); but this FREEZES the 4k eeproms
+    // NOTE .powerDown ONLY works with the 4K eeproms - larger eeproms require the I2C bus clock to keep running with: LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_ON); but this FREEZES the 4k eeproms
 
   LowestBattery = InternalReferenceConstant / uint16_Buffer;   
     if(ECHO_TO_SERIAL){
       Serial.print(F(", Lowest Bat[mV]: "));Serial.println(LowestBattery);Serial.flush();
       } 
   if (LowestBattery <= systemShutdownVoltage){
-  error(); // shutdown down the logger
+  error_shutdown(); // shutdown down the logger
   } 
 
-  EEmemoryPointr += bytesPerRecord;
-  if( EEmemoryPointr >= EEbytesOfStorage){
-      // then the eeprom memory is full!
-      error();  // so shutdown down the logger
+  EEmemoryPointr += bytesPerRecord;     //advances our eeprom memory pointer for the next loop after waknig
+  if( EEmemoryPointr >= EEbytesOfStorage){ // then the eeprom memory is full!
+      error_shutdown();  // so shutdown down the logger
       }
 
-  sleepNwait4RTCalarm(); // sleep till the next alarm
+  sleepNwait4RTCalarm(); //  if the eeprom memory still has room, sleep until the next RTC alarm
 
 //======== END OF MAIN loop()===============================================================
 //==========================================================================================
@@ -659,7 +688,57 @@ void setup_sendboilerplate2serialMonitor(){
     Serial.flush();
 }
 
-void setup_printMenuOptions(){  // note: setup_sendboilerplate2serialMonitor(); runs once on startup before this
+void setup_displayStartMenu() {       
+//-----------------------------------------------------------------------------------------
+
+    while (Serial.available() > 0){byteBuffer1 = Serial.read();}  // this just clears out any residual data in serial send buffer before starting our menu
+  
+    Serial.setTimeout(1000);      // 1000 milliseconds is the default timeout for the Serial.read(); command
+    uint8_t inByte=0;
+    boolean wait4input = true;
+    boolean displayMenuAgain = true;
+    uint32_Buffer = millis();  //Beginning of time-out period must be unsigned long variable
+
+  do{ inByte=0;
+    if (displayMenuAgain) { 
+      startMenu_printMenuOptions(); displayMenuAgain=false;}
+
+    if (Serial.available()) { 
+      inByte = Serial.parseInt(); } //from https://forum.arduino.cc/t/simple-serial-menu-without-a-library/669556
+    
+    switch (inByte) {  //NOTE: switch can also accept 'letter inputs' with single quotes: case 'Z':
+            case 1:
+              startMenu_sendData2Serial(true);  
+              displayMenuAgain=true;  break;
+            case 2:
+              startMenu_setRTCtime(); Serial.setTimeout(1000); 
+              displayMenuAgain=true;  break;
+            case 3:
+              startMenu_setSampleInterval(); Serial.setTimeout(1000); 
+              displayMenuAgain=true;  break;
+            case 4:
+              ECHO_TO_SERIAL = !ECHO_TO_SERIAL;  // toggles the boolean true/false variable
+              displayMenuAgain=true;  break;
+            case 5:
+              startMenu_setVrefConstant(); Serial.setTimeout(1000);
+              displayMenuAgain=true;  break; 
+            case 6:                     // this is the 'start logger' option
+              wait4input=false; break;  // breaks you out of the switch-case loop & sends you back to Setup function where displayStartMenu was first called
+            //case '7':  //a hidden debugging option not displayed in the startmenu
+            //  startMenu_sendData2Serial(false);  displayMenuAgain=true;  break;
+              
+            default:    // Check milliseconds elapsed & send logger into shutdown if we've waited too long
+              if ((millis() - uint32_Buffer) > 480000) { // start menu has an 480000 = 8 minute timeout
+              Serial.println(F("Startmenu Timed out with NO command recieved?"));
+              Serial.println(F("Logger is shutting down...")); Serial.flush(); error_shutdown(); 
+              }
+              break;
+         }                  //  terminates switch-case cascade
+      }while(wait4input);   //  the do-while loop keeps checking for input if wait4input=true;
+  return;
+}
+
+void startMenu_printMenuOptions(){  // note: setup_sendboilerplate2serialMonitor(); runs once on startup before this
 //-----------------------------------------------------------------------------------------
 
   Serial.println();
@@ -667,7 +746,7 @@ void setup_printMenuOptions(){  // note: setup_sendboilerplate2serialMonitor(); 
   sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute);  //combines numeric time variables to a human readable text string
   Serial.print(F("Current Logger time:"));Serial.print(CycleTimeStamp);Serial.print(F(":"));Serial.print(t_second); //seconds separate because usually value is zero
   EEPROM.get(4,InternalReferenceConstant);
-  Serial.print(F(", VREF const.="));Serial.print(InternalReferenceConstant);Serial.println(F(" (default:1126400)"));
+  Serial.print(F(", Current VREF const.="));Serial.println(InternalReferenceConstant);
   if(ECHO_TO_SERIAL){
   Serial.print(F("SERIAL output ON"));
   }else{
@@ -675,8 +754,8 @@ void setup_printMenuOptions(){  // note: setup_sendboilerplate2serialMonitor(); 
   } 
   SampleIntervalMinutes = EEPROM.read(8);
   SampleIntervalSeconds = EEPROM.read(9);
-  Serial.print(F(", Every "));Serial.print(SampleIntervalMinutes);Serial.print(F("m "));Serial.print(SampleIntervalSeconds);Serial.print(F("s"));
-  Serial.print(F(" logs: "));
+  Serial.print(F(", Interval: "));Serial.print(SampleIntervalMinutes);Serial.print(F("m "));Serial.print(SampleIntervalSeconds);Serial.print(F("s"));
+  Serial.print(F(" Logging: "));
     #ifdef LogLowestBattery
       Serial.print(F("LoBat.[mv], "));
     #endif
@@ -692,58 +771,9 @@ void setup_printMenuOptions(){  // note: setup_sendboilerplate2serialMonitor(); 
     Serial.println(F("  [4] Toggle SERIAL    [5] Change VREF"));
     Serial.println(F("  [6] START logging"));
     Serial.println(); Serial.flush();
-}   //terminates setup_printMenuOptions
+}   //terminates startMenu_printMenuOptions
 
-void setup_displayStartMenu() {       
-//-----------------------------------------------------------------------------------------
-
-    while (Serial.available() > 0){byteBuffer1 = Serial.read();}  // this just clears out any residual data in serial send buffer before starting our menu
-  
-    Serial.setTimeout(1000);      // 1000 milliseconds is the default timeout for the Serial.read(); command
-    uint8_t inByte=0;
-    boolean wait4input = true;
-    boolean displayMenuAgain = true;
-    uint32_Buffer = millis();  //Beginning of time-out period must be unsigned long variable
-
-  do{ inByte=0;
-    if (displayMenuAgain) { 
-      setup_printMenuOptions(); displayMenuAgain=false;}
-
-    if (Serial.available()) { 
-      inByte = Serial.parseInt(); } //from https://forum.arduino.cc/t/simple-serial-menu-without-a-library/669556
-    
-    switch (inByte) {  //NOTE: switch can also accept 'letter inputs' with single quotes: case 'Z':
-            case 1:
-              setup_sendSensorData2Serial(true);  displayMenuAgain=true;  break;
-            case 2:
-              setup_setRTCtime(); Serial.setTimeout(1000); 
-              displayMenuAgain=true;  break;
-            case 3:
-              setup_changeSampleInterval(); Serial.setTimeout(1000); 
-              displayMenuAgain=true;  break;
-            case 4:
-              ECHO_TO_SERIAL = !ECHO_TO_SERIAL;
-              displayMenuAgain=true;  break;
-            case 5:
-              updateVref(); Serial.setTimeout(1000);
-              displayMenuAgain=true;  break;
-            case 6:
-              wait4input=false;   break;      // sends you back to Setup where displayStartMenu was first called
-            //case '7':  //a hidden debugging option not displayed in the startmenu
-            //  setup_sendSensorData2Serial(false);  displayMenuAgain=true;  break;
-              
-            default:    // Check milliseconds elapsed & send logger into shutdown if we've waited too long
-              if ((millis() - uint32_Buffer) > 480000) { // start menu has an 480000 = 8 minute timeout
-              Serial.println(F("Startmenu Timed out with NO command recieved?"));
-              Serial.println(F("Logger is shutting down...")); Serial.flush(); error(); 
-              }
-              break;
-         }                  //  terminates switch-case cascade
-      }while(wait4input);   //  the do-while loop keeps checking for input if wait4input=true;
-  return;
-}
-
-void updateVref(){  //default =1126400L = 1100mV * 1024 
+void startMenu_setVrefConstant(){  //default =1126400L = 1100mV * 1024 
 //-----------------------------------------------------------------------------------------
 do {
     Serial.println(F("Input a new Vref constant between 1000000 and 1228800:")); //1,126,400L = default for 1100mV * 1024
@@ -753,9 +783,9 @@ do {
    Serial.print(F("Vref set to: ")); Serial.println(InternalReferenceConstant);
    EEPROM.put(4,InternalReferenceConstant); // every time you run the logger it will retrieve the interval from the previous run 
    return;
-} // terminates updateVref
+} // terminates startMenu_setVrefConstant
 
-void setup_changeSampleInterval(){
+void startMenu_setSampleInterval(){
 //-----------------------------------------------------------------------------------------
 do {
     Serial.println();Serial.println(F("Input a sampling interval of 1,2,5,15,30,60 or [0] minutes:"));
@@ -787,9 +817,9 @@ do {
     EEPROM.update(9,SampleIntervalSeconds); // every time you run the logger it will retrieve the interval from the previous run 
     
  return;
-}//setup_changeSampleInterval
+}//startMenu_setSampleInterval
 
-void setup_setRTCtime(){
+void startMenu_setRTCtime(){
 //-----------------------------------------------------------------------------------------
   Serial.println(F("Enter current date/time with digits as indicated:"));  // note Serial.parseInt will ONLY ACCEPT NUMBERS from the serial window!
   Serial.setTimeout(100000); 
@@ -809,14 +839,14 @@ void setup_setRTCtime(){
     } //terminates if (t_month==0 && t_day==0){
 }
 
-void setup_sendSensorData2Serial(boolean convertDataFlag){ // called at startup via serial window
+void startMenu_sendData2Serial(boolean convertDataFlag){ // called at startup via serial window
 //===============================================================================================
-// NOTE: the ORDER of BYTES/SENSORS listed in setup_sendSensorData2Serial MUST EXACTLY MATCH
+// NOTE: the ORDER of BYTES/SENSORS listed in startMenu_sendData2Serial MUST EXACTLY MATCH
 // the order you ADDED those SENSOR READINGS when loading the EEprom write buffer in the main loop
 
 // header information
   setup_sendboilerplate2serialMonitor(); // a description of the deployment should be part of the data output
-  Serial.println(F("Convert Unixtime to Excel with:  =CELLref/(24*60*60) + DATE(1970,1,1)"));
+  Serial.println(F("Convert Unixtime to Excel Dates with = UnixTime/#secondsInaDay + DATE(1970,1,1) "));
   Serial.print(F("UnixTime,"));
   
 #ifdef LogLowestBattery
@@ -865,24 +895,31 @@ void setup_sendSensorData2Serial(boolean convertDataFlag){ // called at startup 
 
   // order of sensors & bytes listed here must EXACLTY MATCH the order in which you loaded the bytes into the eeprom in the main loop
 
-#ifdef LogLowestBattery   // stored as two data bytes, low byte first
+#ifdef LogLowestBattery     // stored as two data bytes in the Main Loop, with lowByte first, then highByte
       byteBuffer1 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;    //Low byte was saved first
-      integerBuffer = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;  //Hi byte is next
-      integerBuffer = integerBuffer<<8 | byteBuffer1; // this combines the two separate eeprom bytes back into an integer variable
+      byteBuffer2 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;    //highByte is next
+      integerBuffer = (int16_t)((byteBuffer2 << 8) | byteBuffer1);    // this combines the two separate eeprom bytes back into an integer variable
       Serial.print(integerBuffer);Serial.print(F(","));
 #endif
 
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// STEP6 : following the patterns shown directly above extract the Temperature sensor bytes from the EEprom
+// in the SAME ORDER you saved them in during step #5, then use the integerBuffer = (int16_t)((byteBuffer2 << 8) + byteBuffer1); method
+// to combine those bytes back into an integer variable. Don't forget to add a comma to separate the numbers on screen.
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 #ifdef Si7051_Address 
-        byteBuffer1 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;//low byte
-        TEMP_si7051 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;//hi byte
-        TEMP_si7051 = (TEMP_si7051 << 8) | byteBuffer1;
+        byteBuffer1 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;  //low byte
+        TEMP_si7051 = i2c_eeprom_read_byte(EEpromI2Caddr,RecordMemoryPointer);RecordMemoryPointer++;  //hi byte
+        TEMP_si7051 = (TEMP_si7051 << 8) | byteBuffer1;  // another common method of combining two separate bytes into one unsigned integer variable with bitshifting
         Serial.print(((175.26*TEMP_si7051)/65536.0)-46.85,3);Serial.print(F(",")); 
         //integer converted to celcius (3 decimals output)  
         //or Serial.print(TEMP_si7051); to print raw integer 
 #endif // #ifdef Si7051_Address
 
-          } //terminator for if(convertDataFlag)
-
+  } //terminator for if(convertDataFlag)
   Serial.println();
   EEmemoryPointr += bytesPerRecord;
   
@@ -890,7 +927,7 @@ void setup_sendSensorData2Serial(boolean convertDataFlag){ // called at startup 
   //---------------------------------------------------------------------------------------
 
   Serial.flush();
-}  // terminates setup_sendSensorData2Serial() function
+}  // terminates startMenu_sendData2Serial() function
 
 
 //==========================================================================================
@@ -952,14 +989,14 @@ byte i2c_writeRegisterByte(uint8_t deviceAddress, uint8_t registerAddress, uint8
     if(ECHO_TO_SERIAL){   //NOTE: only call halt on error if in debug mode!
       Serial.print(F("FAIL in I2C register write! Result code: "));
       Serial.println(result); Serial.flush();
-      error();
+      error_shutdown();
     }
   }
   // LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);  // some sensors need this settling time after a register change?
   return result;
 }
 
-uint8_t i2c_eeprom_read_byte(uint8_t deviceAddress, uint16_t memoryAddress ) {  // called by void setup_sendSensorData2Serial
+uint8_t i2c_eeprom_read_byte(uint8_t deviceAddress, uint16_t memoryAddress ) {  // called by void startMenu_sendData2Serial
 //-----------------------------------------------------------------------------------------
 // unlike i2c_readRegisterByte this function takes a TWO-byte memory address
 
@@ -1014,7 +1051,7 @@ uint16_t readBattery(){    // reads 1.1vref as input against VCC as reference vo
         if(ECHO_TO_SERIAL){
           Serial.print(railvoltage); Serial.println(F(" battery voltage too low!")); Serial.flush();
         }
-      error();} // this shuts down the logger
+      error_shutdown();} // this shuts down the logger
          
   return railvoltage; 
 }  // terminator for readBattery()
@@ -1025,7 +1062,7 @@ ISR (ADC_vect){ adc_interrupt_counter++;}  // called by the readBattery() FUNCTI
 // ======================================================================================
 //   *  *   *  *  *  *  *  *  *  *  ERROR HANDLER   *  *  *  *  *  *  *  *  *  *  *  *  *
 // ======================================================================================
-void error() {
+void error_shutdown() {
 
 if(ECHO_TO_SERIAL){
    Serial.print(F("Shutting Down: LowBattery @")); Serial.println(LowestBattery); Serial.flush();
@@ -1033,25 +1070,39 @@ if(ECHO_TO_SERIAL){
   
   power_twi_enable();
   RTC_DS3231_turnOffBothAlarms(); //before we disable I2C
+  noInterrupts ();
   bitSet(EIFR,INTF0);     // clear flag for interrupt 0  see: https://gammon.com.au/interrupts
   bitSet(EIFR,INTF1);     // clear flag for interrupt 1
+  interrupts (); 
 
-  pinMode(13, OUTPUT);         // = D13 OUTPUT
+  pinMode(13, OUTPUT);                        // the built-in red led on the Arduino is on D13
   for (byte CNTR = 0; CNTR < 253; CNTR++) {   // FLASH red indicator LED to indicate error state
-    PINB = B00100000;                         // ^ TOGGLES D13 LED pullup resistor ON/Off
+    PINB = B00100000;                         // writing a bit to the pin register TOGGLES D13 LED pullup resistor On/Off
     LowPower.powerDown(SLEEP_250MS, ADC_ON, BOD_OFF);
   }
   
   bitSet(ACSR,ACD);       // Disable the analog comparator by setting the ACD bit (bit 7) of the ACSR register to one.
   ADCSRA = 0; SPCR = 0;   // Disable ADC & SPI // only use PRR after disabling the peripheral clocks, otherwise the ADC is "frozen" in an active state drawing power
-  power_all_disable();    // Turn all the internal peripherals off - must come after disabling ADC
+  power_all_disable();    // Turn ALL the internal peripherals off - must come after disabling ADC
 
- // FLOAT all digital pins so no current can leak after shutdown
-    for (int i = 0; i <=13; i++) { 
+ // FLOAT digital pins so no current can leak after shutdown:
+    for (int i = 2; i <=13; i++) { 
     pinMode(i, INPUT);  digitalWrite(i, LOW);  
     }
-    
-  LowPower.powerDown(SLEEP_FOREVER,ADC_OFF,BOD_OFF);
+ if(!ECHO_TO_SERIAL){
+    pinMode(0, INPUT);  digitalWrite(0, LOW);     // d1&0 set as inputs/low
+    pinMode(1, INPUT);  digitalWrite(1, LOW);     // don't change USART pins in ECHO_TO_SERIAL debug mode
+  }// #endif
+
+  pinMode(A0, INPUT);  digitalWrite(A0, LOW);
+  pinMode(A1, INPUT);  digitalWrite(A1, LOW);
+  pinMode(A2, INPUT);  digitalWrite(A2, LOW);
+  pinMode(A3, INPUT);  digitalWrite(A3, LOW);
+  pinMode(A4, INPUT);  digitalWrite(A4, LOW);
+  pinMode(A5, INPUT);  digitalWrite(A5, LOW);
+  //Note: A4 & A5 are still connected to I2C pullups on RTC module
+  
+  LowPower.powerDown(SLEEP_FOREVER,ADC_ON,BOD_OFF);  //ADC_ON is a bit confusing here - what it really means is 'leave the existing ADC state alone', and we have already disabled it with power_all_disable();
 }
 
 //==========================================================================================
@@ -1059,7 +1110,7 @@ if(ECHO_TO_SERIAL){
 //   *  *   *  *  Functions used for RTC control  *  *  *  *  *  *  *  *  *  *  *  *  *
 //==========================================================================================
 //==========================================================================================
-// modified from the original JeeLab's fantastic real time clock library that was released into the public domain 
+// modified from JeeLab's fantastic real time clock library released into the public domain 
 // =========================================================================================
 
 void RTC_DS3231_getTime(){
@@ -1068,13 +1119,13 @@ void RTC_DS3231_getTime(){
   Wire.write(0);
   Wire.endTransmission();
   Wire.requestFrom(DS3231_ADDRESS, 7);
-  t_second = bcd2bin(Wire.read() & 0x7F);
-  t_minute = bcd2bin(Wire.read());
-  t_hour = bcd2bin(Wire.read());
+  t_second = rtc_bcd2bin(Wire.read() & 0x7F);
+  t_minute = rtc_bcd2bin(Wire.read());
+  t_hour = rtc_bcd2bin(Wire.read());
   Wire.read();
-  t_day = bcd2bin(Wire.read());
-  t_month = bcd2bin(Wire.read());
-  t_year = bcd2bin(Wire.read()) + 2000;
+  t_day = rtc_bcd2bin(Wire.read());
+  t_month = rtc_bcd2bin(Wire.read());
+  t_year = rtc_bcd2bin(Wire.read()) + 2000;
   return;
 }
 
@@ -1082,13 +1133,13 @@ void RTC_DS3231_setTime(){
 //------------------------
    Wire.beginTransmission(DS3231_ADDRESS);
    Wire.write((byte)0);
-   Wire.write(bin2bcd(t_second));
-   Wire.write(bin2bcd(t_minute));
-   Wire.write(bin2bcd(t_hour));
-   Wire.write(bin2bcd(0));
-   Wire.write(bin2bcd(t_day));
-   Wire.write(bin2bcd(t_month));
-   Wire.write(bin2bcd(t_year - 2000));
+   Wire.write(rtc_bin2bcd(t_second));
+   Wire.write(rtc_bin2bcd(t_minute));
+   Wire.write(rtc_bin2bcd(t_hour));
+   Wire.write(rtc_bin2bcd(0));
+   Wire.write(rtc_bin2bcd(t_day));
+   Wire.write(rtc_bin2bcd(t_month));
+   Wire.write(rtc_bin2bcd(t_year - 2000));
    //Wire.write(0); //what is the last one for?
    Wire.endTransmission();
   }
@@ -1098,16 +1149,16 @@ void RTC_DS3231_setAlarm1Simple(byte hour, byte minute) {
   RTC_DS3231_setA1Time(0, hour, minute, 00, 0b00001000, false, false, false);
 }
 
-void RTC_DS3231_setA1Time(byte A1Day, byte A1Hour, byte A1Minute, byte A1Second, byte AlarmSelectBits, bool A1Dy, bool A1h12, bool A1PM) {
+void RTC_DS3231_setA1Time(byte A1Day, byte A1Hour, byte A1Minute, byte A1Second, byte AlarmNumberBits, bool A1Dy, bool A1h12, bool A1PM) {
 //-----------------------------------------------------------------------------------------------------------------------------------
 //  Sets the alarm-1 date and time on the DS3231, using A1* information
   byte temp_buffer;
   Wire.beginTransmission(DS3231_ADDRESS);
   Wire.write(0x07);    // A1 starts at 07h
   // Send A1 second and A1M1
-  Wire.write(bin2bcd(A1Second) | ((AlarmSelectBits & 0b00000001) << 7));
+  Wire.write(rtc_bin2bcd(A1Second) | ((AlarmSelectBits & 0b00000001) << 7));
   // Send A1 Minute and A1M2
-  Wire.write(bin2bcd(A1Minute) | ((AlarmSelectBits & 0b00000010) << 6));
+  Wire.write(rtc_bin2bcd(A1Minute) | ((AlarmSelectBits & 0b00000010) << 6));
   // Figure out A1 hour
   if (A1h12) {
     // Start by converting existing time to h12 if it was given in 24h.
@@ -1119,21 +1170,21 @@ void RTC_DS3231_setA1Time(byte A1Day, byte A1Hour, byte A1Minute, byte A1Second,
     if (A1PM) {
       // Afternoon
       // Convert the hour to BCD and add appropriate flags.
-      temp_buffer = bin2bcd(A1Hour) | 0b01100000;
+      temp_buffer = rtc_bin2bcd(A1Hour) | 0b01100000;
     } else {
       // Morning
       // Convert the hour to BCD and add appropriate flags.
-      temp_buffer = bin2bcd(A1Hour) | 0b01000000;
+      temp_buffer = rtc_bin2bcd(A1Hour) | 0b01000000;
     }
   } else {
     // Now for 24h
-    temp_buffer = bin2bcd(A1Hour);
+    temp_buffer = rtc_bin2bcd(A1Hour);
   }
   temp_buffer = temp_buffer | ((AlarmSelectBits & 0b00000100) << 5);
   // A1 hour is figured out, send it
   Wire.write(temp_buffer);
   // Figure out A1 day/date and A1M4
-  temp_buffer = ((AlarmSelectBits & 0b00001000) << 4) | bin2bcd(A1Day);
+  temp_buffer = ((AlarmSelectBits & 0b00001000) << 4) | rtc_bin2bcd(A1Day);
   if (A1Dy) {
     // Set A1 Day/Date flag (Otherwise it's zero)
     temp_buffer = temp_buffer | 0b01000000;
@@ -1158,39 +1209,45 @@ void RTC_DS3231_turnOnAlarm(byte Alarm) {
 void RTC_DS3231_turnOffBothAlarms() {  // from http://forum.arduino.cc/index.php?topic=109062.0
 //-----------------------------------
   byteBuffer1=i2c_readRegisterByte(DS3231_ADDRESS,DS3231_STATUS_REG);
-  byteBuffer1 &= B11111100; //with '&=' only the 0's affect the target byte // with '|=' only the 1's will set
+  byteBuffer1 &= B11111100; //change the target bits //with '&=' only the 0's affect the target byte // with '|=' only the 1's will set
   i2c_writeRegisterByte(DS3231_ADDRESS,DS3231_STATUS_REG,byteBuffer1);
   rtc_INT0_Flag = false; //clear the flag we use to indicate the RTC alarm occurred
 }
 
-static uint8_t bcd2bin (uint8_t val) {
-  return val - 6 * (val >> 4);
-}
-static uint8_t bin2bcd (uint8_t val) {
-  return val + 6 * (val / 10);
-}
-
-const uint8_t days_in_month [12] PROGMEM = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-//#define SECONDS_FROM_1970_TO_2000 946684800
-uint32_t RTC_DS3231_unixtime() {
+uint32_t RTC_DS3231_unixtime() { 
+//-----------------------------------
+// call this function AFTER RTC_DS3231_getTime updates the global t_ variables
   uint32_t t;
-  uint16_t days = date2days(t_year, t_month, t_day);
-  t = time2long(days, t_hour, t_minute, t_second);
+  uint16_t days = rtc_date2days(t_year, t_month, t_day);
+  t = rtc_time2long(days, t_hour, t_minute, t_second);
   t += 946684800;  // add # seconds from 1970 to 2000 which we took away with y -= 2000
   return t;
 }
 
-static long time2long(uint16_t days, uint8_t h, uint8_t m, uint8_t s) {
+//Calculation / Conversion functions called by RTC_DS3231 functions
+//-----------------------------------------------------------------
+
+const uint8_t rtc_days_in_month [12] PROGMEM = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
+static uint8_t rtc_bcd2bin (uint8_t val) {
+  return val - 6 * (val >> 4);
+}
+
+static uint8_t rtc_bin2bcd (uint8_t val) {
+  return val + 6 * (val / 10);
+}
+
+static long rtc_time2long(uint16_t days, uint8_t h, uint8_t m, uint8_t s) {
   return ((days * 24L + h) * 60 + m) * 60 + s;
 }
 
 // number of days since 2000/01/01, valid for 2001..2099
-static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
+static uint16_t rtc_date2days(uint16_t y, uint8_t m, uint8_t d) {
   if (y >= 2000)
     y -= 2000;
   uint16_t days = d;
   for (uint8_t i = 1; i < m; ++i)
-    days += pgm_read_byte(days_in_month + i - 1);
+    days += pgm_read_byte(rtc_days_in_month + i - 1);
   if (m > 2 && (y % 4 == 0)) // modulo checks (if is LeapYear) add extra day
     ++days;
   return days + 365 * y + (y + 3) / 4 - 1;
@@ -1213,69 +1270,60 @@ static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
 // ===========================================================================================================
 
 // ============================================================================================================
+// SI7051 TEMPERATURE SENSOR - here as an 'example' but we will not use this particular sensor in the course
 // ============================================================================================================
-// SI7051 TEMPERATURE SENSOR - here as an 'example' but we will not use this sensor in the course
-// ============================================================================================================
-// ============================================================================================================
+// datasheet at : http://www.silabs.com/Support%20Documents/TechnicalDocs/Si7050-1-3-4-5-A20.pdf 
 // code from https://github.com/closedcube/ClosedCube_Si7051_Arduino/blob/master/src/ClosedCube_Si7051.cpp
-// datasheet at : http://www.silabs.com/Support%20Documents/TechnicalDocs/Si7050-1-3-4-5-A20.pdf  
 
-#if defined(Si7051_Address)   //then include these functions
+#ifdef Si7051_Address  //compiler will include these functions up to the next #endif statement
+
 //--------------------------------------------------------
-void initSI7051()
+void initializeSI7051() {
 //--------------------------------------------------------
-{
-  byteBuffer1=0; 
   if(ECHO_TO_SERIAL){
-  Serial.println(F("INIT: SI7051 sensor..."));
-  Serial.flush(); 
+  Serial.println(F("INIT: SI7051 sensor..."));Serial.flush(); 
   }
   
   Wire.beginTransmission(Si7051_Address);
   Wire.write(0xE6); //settings regester
   Wire.write(0x0);  //bit 0 and bit 7 to zero sets highest 14 bit resolution on sensor
   byteBuffer1 = Wire.endTransmission();
+  
   if ( byteBuffer1 != 0) {
         if(ECHO_TO_SERIAL){  //if echo is on, we are in debug mode, and errors force a halt.
-        Serial.print (F("FAIL Initial control reg write:si7051"));
+        Serial.print (F("FAIL Initial control reg write:si7051"));Serial.flush(); 
         }
-    error();
+    error_shutdown();
     byteBuffer1=0;
   }
 }
 //--------------------------------------------------------
-int readSI7051() 
+int readSI7051() {
 //--------------------------------------------------------
-//Conversion time: 14-bit temperature  10 ms
-//Temperature conversion in progress: 120 μA
-//peak current during I2C operations 4.0 mA
+//Conversion time: 14-bit temps = 10 ms @ 120 μA, peak current during I2C operations 4.0 mA
 
-{
-  byteBuffer1=0; 
+  //first transaction targets the memory register(s) we want to read
   Wire.beginTransmission(Si7051_Address);
   Wire.write(0xF3);
-  Wire.write(Si7051_Address);   //why is this repeated three times?
-  //Wire.write(SI7051_ADDRESS);  
-  //Wire.write(SI7051_ADDRESS);
+  Wire.write(Si7051_Address);
   byteBuffer1 = Wire.endTransmission();
     if ( byteBuffer1 != 0) {
       if(ECHO_TO_SERIAL){  //if echo is on, we are in debug mode, and errors force a halt.
-      Serial.println(F("FAIL request data:si7051")); 
-      error();
+      Serial.println(F("FAIL request data:si7051")); Serial.flush(); 
+      error_shutdown();
       }
     byteBuffer1=0;
   } 
   //delay(10);
   LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF); // some of my sensors need settling time after a register change.
-  
-  Wire.requestFrom(Si7051_Address, 2);
+
+  //second I2C transaction requests the data from those memory registers
+  Wire.requestFrom(Si7051_Address, 2); //this sensor stores its output in two memory registers
   byte msb = Wire.read();
   byte lsb = Wire.read();
-  uint16_t val= msb << 8 | lsb;
-  return val; //to calculate TEMP_degC =(175.26*val) / 65536 - 46.85;
+  uint16_t val= msb << 8 | lsb;   // merge the two output register bytes into one integer number
+  return val;                     //note:  to calculate TEMP_degC =(175.26*val) / 65536 - 46.85;
 }
-// ============================================================================================================
-// ============================================================================================================
-#endif // end of code for SI7051 sensor
-// ============================================================================================================
+
+#endif // end of code for SI7051 sensor included via controlling #ifdef / #endif statements
 // ============================================================================================================
