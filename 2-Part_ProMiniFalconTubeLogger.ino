@@ -34,7 +34,7 @@ const char deploymentDetails[] PROGMEM = "Description of the current deployment"
 #define LogLowestBattery        // 2-bytes: saves LowestBattery recorded during operation
 //#define Si7051_Address 0x40   // 2-bytes: NOTE the si7051 is often used for NTC calibration
 
-#define LED_r9_b10_g11_gnd12    // enables code for RGB indicator LED (if attached) - Red LED on D13 gets used if #define LED_r9_b10_g11_gnd12 is commented out
+//#define LED_r9_b10_g11_gnd12    // enables code for RGB indicator LED (if attached) - Red LED on D13 gets used if #define LED_r9_b10_g11_gnd12 is commented out
 
 
 // Ref, Sampling Interval & Echo can be reset via serial monitor input - so the values here don't matter
