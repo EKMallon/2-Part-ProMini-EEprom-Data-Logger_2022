@@ -19,7 +19,4 @@ Odd byte quantities per sensor record (other than one) and you end up with page 
 ---
 
 Note: This script will still run on the 3-module "Modules & Jumper Wires"  loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/18/2/530 
-and provides a 'no SD card' method of extending lifespan on the 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/  where multiple I2C eeproms can be added easily via the breadboard(s)
-
----
-Addendum 2023-10-25: Code revisions are *currently underway* to support the use of these loggers in enviro-sci course curriculum & some elements of the old code may disappear for a while until our students have progressed further through the lab sequence. Those elements will then be restored to the base code. This may cause discrepancies between the text in the 2-part logger blog post and the options in the code posted here.
+and provides a 'no SD card' operation on the older 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/ but you will have to change the LED pins.
