@@ -1171,7 +1171,7 @@ void sleepNwait4RTCalarm() {                          //NOTE all existing pin st
   bitSet(EIFR,INTF0);                                 // clears interrupt 0's flag bit before attachInterrupt(0,isr,xxxx)
   attachInterrupt(0,rtc_d2_alarm_ISR,LOW);            //RTC alarm connected to pin D2 // LOW assures it will always respond if the RTC alarm is asserted
   interrupts();
-  LowPower.powerDown(SLEEP_FOREVER, ADC_ON, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
   
   //HERE AFTER WAKING  // note that detachInterrupt(0); happened inside the ISR
     
@@ -1180,7 +1180,7 @@ void sleepNwait4RTCalarm() {                          //NOTE all existing pin st
   Wire.write(0);                                     // clearing the entire status register turns Off (both) RTC alarms though technically only the last two bits need to be set
   Wire.endTransmission();
   rtc_INT0_Flag = false;                             // clear the flag we use to indicate the RTC alarm occurred
-  LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);   // coincell voltage recovery time from Wakup & I2C transaction
+  LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);   // coincell voltage recovery time from Wakup & I2C transaction
   
 }  //terminator for sleepNwait4RTCalarm
 
@@ -1210,7 +1210,7 @@ void sleepNwait4D3InterruptORrtcAlarm(){
   
   interrupts ();
   
-  LowPower.powerDown(SLEEP_FOREVER, ADC_ON, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
 
   if (d3_INT1_Flag) {        // d3_INT1_Flag is set true in input_d3_interrupt_ISR()
        if (d3_INT1_eventCounter < 65532) {d3_INT1_eventCounter++;}  // only increment our counter variable if it's below the uint16_t max
@@ -1223,7 +1223,7 @@ void sleepNwait4D3InterruptORrtcAlarm(){
         bitClear(DDRC,2);bitSet(PORTC,2);                   // Blue LED = pinMode(A2,INPUT_PULLUP);
         #endif
         
-        LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);    // time to view LED pip
+        LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);    // time to view LED pip
         
         #if defined(LED_r9_b10_g11_gnd12) 
         pinMode(10,INPUT);                                  // D10 [blue] LED pullup OFF 
@@ -1242,7 +1242,7 @@ void sleepNwait4D3InterruptORrtcAlarm(){
       Wire.write(DS3231_STATUS_REG);
       Wire.write(0);      // turns Off (both) RTC alarms
       Wire.endTransmission();
-      LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);   // coincell recovery time after I2C transaction
+      LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);   // coincell recovery time after I2C transaction
                           // NOTE: do not set rtc_INT0_Flag = false; here! //must wait till AFTER we break out of counting while loop
                           // because: while (rtc_INT0_Flag == false) { is the "sub-loop" that acts as the PIR event counter
 
