@@ -1,5 +1,6 @@
 // 2-Part logger code by Edward Mallon - modified 2023 for e360 course at Northwestern University
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
+
 /*
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from the Cave Pearl Project. 
 The goal is to provide a starting point for self-built student projects in environmental monitoring.
@@ -25,13 +26,13 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 // PIRtriggersSensorReadings could be enabled with four other bytes of sensor data [for a total of 8 bytes per record] OR with another 12 bytes of sensor data for a total of 16 bytes per record.
 
 // LowestBattery & RTC_Temperature are the 2 byte 'base values' which are generally recorded with every sensor reading (as they require no extra sensor hardware beyond the logger itself)
-#define logLowestBattery                    // 1-byte (compressed): saves LowestBattery recorded during operation
+//#define logLowestBattery                  // 1-byte (compressed): saves LowestBattery recorded during operation
 #define logRTC_Temperature                  // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
 
-//#define countPIReventsPerSampleInterval          // 2-bytes:  saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersSensorReadings - choose one or the other
+//#define countPIReventsPerSampleInterval   // 2-bytes:  saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersSensorReadings - choose one or the other
 
-//#define ReadNTC_6ref7ntc                    // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
-//#define ReadLDR_onD9                        // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
+//#define ReadNTC_6ref7ntc                  // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+//#define ReadLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                             // OLDER unit Configuration:  10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9
 
 //#define bh1750_Address 0x23               // 2-bytes: raw sensor output: gets converted to Lux during download
@@ -45,12 +46,12 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 
 //#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - requires 1000uF rail capacitor!-
 
-#define EEpromI2Caddr 0x57                  // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
-#define EEbytesOfStorage 4096              // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
+#define EEpromI2Caddr 0x50                  // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
+#define EEbytesOfStorage 65536              // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
                                             // OR AT24c512 (via chip swap) 64k: 0x50 & 65536
 
-//#define LED_r9_b10_g11_gnd12 installed      // enables code for RGB indicator LED //1k limit resistor on shared GND line! // Red LED on D13 gets used as indicator if this #define is commented out
-#define LED_GndGB_A0_A2                   // default Red on d13 left in place, A0gnd Green A1, blue A2
+//#define LED_r9_b10_g11_gnd12 installed    // enables code for RGB indicator LED //1k limit resistor on shared GND line! // Red LED on D13 gets used as indicator if this #define is commented out
+#define LED_GndGB_A0_A2                     // default Red on d13 left in place, A0gnd Green A1, blue A2
 
 #include <Wire.h>       // I2C bus coms library: RTC, EEprom & Sensors
 #include <EEPROM.h>     // note: requires default promini bootloader (ie NOT optiboot)
@@ -490,31 +491,40 @@ Serial.println(F("& Starting the logger:"));Serial.flush();
 
 RTC_DS3231_getTime();                     // populates the global variables t_day, t_hour, etc.
 
-  Alarmday = t_day; Alarmhour = t_hour;
+  Alarmday = t_day; Alarmhour = t_hour; Alarmminute = t_minute;
   //AlarmSelectBits = 0b00001000;               // A1 Alarm when hours, minutes and seconds match
   //AlarmSelectBits = 0b00000000;               // A1 Alarm when day of month, hours, minutes and seconds match
 
   if(SampleIntervalSeconds>0){    // NOTE: if the sample interval is in seconds this delay can be VERY short
-      Alarmminute = t_minute;  Alarmsecond = t_second + 1;    
+      Alarmsecond = t_second + 1;    
       do{ Alarmsecond = Alarmsecond + 1;
-      }while(Alarmsecond % SampleIntervalSeconds); // all non-zero results considered true // forces alignment
-        
-      byteBuffer2 = Alarmsecond-t_second; byteBuffer1 = Alarmminute - t_minute;
-      if(Alarmsecond>59){Alarmsecond = 0; Alarmminute=Alarmminute+1; byteBuffer2 =60-t_second; byteBuffer1=0;}
+         }while(Alarmsecond % SampleIntervalSeconds); // all non-zero results considered true // forces alignment
+
+      //bytebuffer1 = delay minutes, bytebuffer2 = delay seconds 
+      //the expected delays sent to serial - not actual alarm times
+      byteBuffer2 = Alarmsecond - t_second; byteBuffer1 = 0;
+      
+      if(Alarmsecond>59){
+        Alarmsecond = 0; 
+        Alarmminute=Alarmminute+1; 
+        byteBuffer2 =60-t_second; 
+        byteBuffer1 = Alarmminute - t_minute;
+        }
       
       }else{ // for minute alarms
 
-      Alarmminute = t_minute; Alarmsecond = 0; byteBuffer2 =0;  
-      if(t_second>58){Alarmminute = Alarmminute + 1;} // and extra buffer if we are too close to rollover
+      Alarmsecond = 0; byteBuffer2 = 0;  
+      if(t_second>58){Alarmminute = Alarmminute + 1;} 
+      // and extra buffer if we are too close to rollover
          
       do{ 
         Alarmminute = Alarmminute + 1;
-      }while(Alarmminute % SampleIntervalMinutes); // all non-zero results considered true // forces alignment
+        }while(Alarmminute % SampleIntervalMinutes); // all non-zero results considered true // forces alignment
       byteBuffer1 = Alarmminute-t_minute;
       }
   Serial.print(F("Start-up Sync Delay: "));Serial.print(byteBuffer1);Serial.print(F("m "));Serial.print(byteBuffer2);Serial.println(F("s "));Serial.flush();
   if (Alarmminute > 59 ){ Alarmhour = Alarmhour+1; Alarmminute = 0;}  // alt Alarmminute = SampleIntervalMinutes? for longer delay if started at rollover
-  if (Alarmhour > 23)   { Alarmday = Alarmday+1; Alarmhour = 0;}
+  if (Alarmhour > 23)   { Alarmday = Alarmday+1; Alarmhour = 0;}      // but day not used here
 
   // NOW set the 1st -ALIGNED- wakeup alarm:
   AlarmSelectBits = 0b00001100;             // A1 Alarm when minutes AND seconds match, ignores days, hours
@@ -536,9 +546,34 @@ RTC_DS3231_getTime();                     // populates the global variables t_da
   #ifdef PIRtriggersSensorReadings
     previousPIRtriggerTime = uint32_Buffer;
   #endif
-  //------------------------------------------------------------------------------  
-  Serial.println(F("Red&Blue LEDs will light during SYNC DELAY until logger takes 1st reading.")); 
-  Serial.println(F("Then Green/Blue LED pips will show when each sensor reading is collected."));
+
+//------------------------------------------------------------------------------  
+// Transfer BACKUP COPY of starting parameters in bytes 0-64 internal 328p eeprom into 0-64 bytes of external eeprom
+// done in four steps because wire buffer can only transfer 16 bytes at a time
+
+  Wire.beginTransmission(EEpromI2Caddr);   // physicalEEpromAddr = block[0];   
+  Wire.write(0); Wire.write(0);       // two bytes to specify the external eeprom address
+  for (uint8_t p = 0; p < 16; p++) { byteBuffer1 = EEPROM.read(p); Wire.write(byteBuffer1);}
+  Wire.endTransmission(); delay(12); // AT24c32 Self-Timed Write Cycle (10 ms max) // LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
+  
+  Wire.beginTransmission(EEpromI2Caddr);          
+  Wire.write(0); Wire.write(16);       // two bytes to specify the external eeprom address
+  for (uint8_t q = 16; q < 32; q++) { byteBuffer1 = EEPROM.read(q); Wire.write(byteBuffer1);}
+  Wire.endTransmission(); delay(12);
+
+  Wire.beginTransmission(EEpromI2Caddr);          
+  Wire.write(0); Wire.write(32);       // two bytes to specify the external eeprom address
+  for (uint8_t r = 32; r < 48; r++) { byteBuffer1 = EEPROM.read(r); Wire.write(byteBuffer1);}
+  Wire.endTransmission(); delay(12);  
+
+  Wire.beginTransmission(EEpromI2Caddr);          
+  Wire.write(0); Wire.write(48);       // two bytes to specify the external eeprom address
+  for (uint8_t s = 48; s < 64; s++) { byteBuffer1 = EEPROM.read(s); Wire.write(byteBuffer1);}
+  Wire.endTransmission(); delay(12); 
+  
+//------------------------------------------------------------------------------  
+  Serial.println(F("LEDs will flash rapidly during SYNC DELAY until logger takes 1st reading.")); 
+  Serial.println(F("After that Green LED pips will show when each sensor reading is collected."));
   Serial.flush();
   
   if(!ECHO_TO_SERIAL){          // if it's not being used, shut down the UART peripheral now to save power
@@ -555,8 +590,9 @@ RTC_DS3231_getTime();                     // populates the global variables t_da
         digitalWrite(10,LOW);pinMode(10,OUTPUT);  // D10 [Blue] LED Output low   //pinMode(10,INPUT);           for lower current around 50uA
         digitalWrite(9,HIGH);pinMode(9,OUTPUT);   // D10 [Red] LED outputl high  //pinMode(9,INPUT_PULLUP);     OUTPUT HIGH PULLS 1.5 mA
   #elif defined(LED_GndGB_A0_A2)
-        PORTC&= B11111110; DDRC|=B00000001;       // A0 LOW (0) & OUTPUT (1) // LED ground
-        bitClear(DDRC,2);bitSet(PORTC,2);         // A2 [Blue] LED INPUT & PULLUP ON
+        pinMode(A2,INPUT);digitalWrite(A2,HIGH);  // A2 [Blue] LED INPUT & PULLUP ON //bitClear(DDRC,2);bitSet(PORTC,2); 
+        pinMode(A1,INPUT);digitalWrite(A1,LOW);   // A1 [Green] LED INPUT & PULLUP OFF //bitClear(DDRC,1);bitClear(PORTC,2);
+        digitalWrite(A0,LOW);pinMode(A0,OUTPUT);  // LED ground enabled // PORTC&= B11111110; DDRC|=B00000001; // A0 LOW (0) & OUTPUT (1) 
   #else
         pinMode(13,INPUT);                        // D13 onboard red LED INPUT with PULLUP OFF  
   #endif
@@ -564,13 +600,13 @@ RTC_DS3231_getTime();                     // populates the global variables t_da
   byteBuffer1 = 2;
   do{   // see a ProMini pin map to understand why we are using PINB here for the LED controls https://images.theengineeringprojects.com/image/webp/2018/06/introduction-to-arduino-pro-mini-2.png.webp?ssl=1
         #if defined(LED_r9_b10_g11_gnd12)         // setting any bits in the 328p PIN control registers to 1 TOGGLES the PULLUP RESISTOR on the associated pins
-          PINB = B00000110;                       // this toggles blue, red led channels with one command
+          PINB = B00000110;                       // TOGGLES blue pullup & red led channels with one command
         #elif defined(LED_GndGB_A0_A2)
-          PINC = B00000110;                       // toggles A2 [Blue] & A1 [green] LED PULLUP with pinc write ~50uA
+          PINC = B00000110;                       // TOGGLES A2 [Blue] & A1 [green] PULLUP resistors with pinc write ~50uA
         #else
-          PINB = B00100000;                       // this toggles ONLY the D13 led // ~50uA to light RED onboard led through D13s internal pullup resistor
+          PINB = B00100000;                       // TOGGLES ONLY the D13 led // ~50uA to light RED onboard led through D13s internal pullup resistor
         #endif 
-        LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF);   //ADC_ON preserves the existing ADC state - if its already off it stays off
+        LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);   //ADC_ON preserves the existing ADC state - if its already off it stays off
     }while(!rtc_INT0_Flag);                       // sends you back to do{ unless the RTC alarm has triggered
   
   RTC_DS3231_turnOffBothAlarms();                 // Note: detachInterrupt(0); already done inside the rtc_d2_alarm_ISR 
@@ -1158,7 +1194,7 @@ void sleepNwait4RTCalarm() {                          //NOTE all existing pin st
   
   noInterrupts();
   bitSet(EIFR,INTF0);                                 // clears interrupt 0's flag bit before attachInterrupt(0,isr,xxxx)
-  attachInterrupt(0,rtc_d2_alarm_ISR,LOW);            //RTC alarm connected to pin D2 // LOW assures it will always respond if the RTC alarm is asserted
+  attachInterrupt(0,rtc_d2_alarm_ISR,LOW);            // RTC alarm connected to pin D2 // LOW assures it will always respond if the RTC alarm is asserted
   interrupts();
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
   
@@ -1266,17 +1302,17 @@ void setup_sendboilerplate2serialMonitor(){
     char OnecharBuffer;
     // retrieve & send 100 character hardware details stored in 328p internal eeprom 
     Serial.print(F("Logger:,")); //Serial.println((__FlashStringHelper*)loggerConfiguration);
-    for (uint16_t k = 55; k < 156; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
+    for (uint16_t k = 64; k < 165; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
     Serial.println();
 
     // retrieve & send 100 character calibration constants stored in 328p internal eeprom
     Serial.print(F("Calibration:,"));
-    for (uint16_t k = 257; k < 357; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
+    for (uint16_t k = 266; k < 367; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
     Serial.println();
   
     // retrieve & send 100 character deployment description stored in 328p internal eeprom
     Serial.print(F("Last Deployment:,"));
-    for (uint16_t k = 156; k < 257; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
+    for (uint16_t k = 165; k < 266; k++) { OnecharBuffer = EEPROM.read(k); Serial.print(OnecharBuffer); }
     Serial.println();
     
     Serial.flush();
@@ -1322,16 +1358,18 @@ void setup_displayStartMenu() {
               startMenu_setVrefConstant(); Serial.setTimeout(1000);
               displayMenuAgain=true;  break; 
             case 8:
-              ECHO_TO_SERIAL = !ECHO_TO_SERIAL;           // toggles the boolean true/false variable
+              ECHO_TO_SERIAL = !ECHO_TO_SERIAL;             // toggles the boolean true/false variable
               displayMenuAgain=true;  break;           
-            case 9:                                       // this is the 'start logger' option
-              wait4input=false; break;                    // wait4input=false breaks you out of the switch-case loop & sends you back to Setup function where displayStartMenu was first called
+            case 9:                                         // this is the 'start logger' option
+              wait4input=false; break;                      // wait4input=false breaks you out of the switch-case loop & sends you back to Setup function where displayStartMenu was first called
             case 10:
-            startMenu_sendData2Serial(false);             // a 'hidden' debugging option not displayed in the startmenu
-            displayMenuAgain=true;  break;                // lets you see the RAW bytes stored in your eeprom
-              
-            default:                                      // Check milliseconds elapsed & send logger into shutdown if we've waited too long
-                if ((millis() - uint32_Buffer) > 480000) {// start menu has an 480000 = 8 minute timeout
+              startMenu_sendData2Serial(false);             // a 'hidden' debugging option not displayed in the startmenu
+              displayMenuAgain=true;  break;                // lets you see the RAW bytes stored in your eeprom
+            case 11:           
+              startMenu_restoreStartValuesFromBackup(); Serial.setTimeout(1000);    // a 'hidden' option NOT DISPLAYED in the startmenu
+              displayMenuAgain=true;  break;                // restores startup parameters from 64byte backup on external eeprom - useful if you have to replace a dead promini          
+            default:                                        // Check milliseconds elapsed & send logger into shutdown if we've waited too long
+                if ((millis() - uint32_Buffer) > 480000) {  // start menu has an 480000 = 8 minute timeout
                 Serial.println(F("Start Menu Timed out with NO commands!"));
                 Serial.println(F("Logger shutting down...")); Serial.flush(); error_shutdown(); 
                 }
@@ -1761,7 +1799,7 @@ Serial.flush(); return;
 }
 
 // erase previous description                 // NOTE I'm leaving LAST 512 eeprom memory locations for future use screen fonts
-for (uint16_t h = 55; h < 156; h++){         // EEPROM.update does not write new data unless new content is different from old
+for (uint16_t h = 64; h < 165; h++){         // EEPROM.update does not write new data unless new content is different from old
     EEPROM.update(h,32);                      // writes [32] to each memory location which is the 'blank space' character in ascii
     if ((h % 16) == 0){Serial.print(F("."));} // send progress indicator dot to the serial monitor window (every 16 characters)
     delay(4); // writing to the internal eeprom needs 3.5 msec per byte ande adds an additional 8mA to the ProMini’s normal 5mA operating current
@@ -1769,7 +1807,7 @@ for (uint16_t h = 55; h < 156; h++){         // EEPROM.update does not write new
 
 // save new 80-character Hardware details to EEprom (serial input buffer limits you to only 80 characters input)
   for (uint16_t i = 0; i < byteBuffer1; i++){
-    EEPROM.update(i+55,receivedChars[i]);
+    EEPROM.update(i+64,receivedChars[i]);
     Serial.print(F("."));
     delay(4);
     }
@@ -1829,7 +1867,7 @@ Serial.flush(); return;
 }
 
 // erase previous description                 // NOTE I'm leaving LAST 512 eeprom memory locations for future use screen fonts
-for (uint16_t h = 257; h < 358; h++){         // EEPROM.update does not write new data unless new content is different from old
+for (uint16_t h = 266; h < 367; h++){         // EEPROM.update does not write new data unless new content is different from old
     EEPROM.update(h,32);                      // writes [32] to each memory location which is the 'blank space' character in ascii
     if ((h % 16) == 0){Serial.print(F("."));} // send progress indicator dot to the serial monitor window (every 16 characters)
     delay(4); // writing to the internal eeprom needs 3.5 msec per byte ande adds an additional 8mA to the ProMini’s normal 5mA operating current
@@ -1837,7 +1875,7 @@ for (uint16_t h = 257; h < 358; h++){         // EEPROM.update does not write ne
 
 // save new 80-character Hardware details to EEprom (serial input buffer limits you to only 80 characters input)
   for (uint16_t i = 0; i < byteBuffer1; i++){
-    EEPROM.update(i+257,receivedChars[i]);
+    EEPROM.update(i+266,receivedChars[i]);
     Serial.print(F("."));
     delay(4);
     }
@@ -1897,18 +1935,15 @@ Serial.flush(); return;
 }
 
 // erase previous description                 // NOTE I'm leaving LAST 512 eeprom memory locations for future use screen fonts
-for (uint16_t h = 156; h < 257; h++){         // EEPROM.update does not write new data unless new content is different from old
+for (uint16_t h = 165; h < 266; h++){         // EEPROM.update does not write new data unless new content is different from old
     EEPROM.update(h,32);                      // writes [32] to each memory location which is the 'blank space' character in ascii
     if ((h % 16) == 0){Serial.print(F("."));} // send progress indicator dot to the serial monitor window (every 16 characters)
     delay(4); // writing to the internal eeprom needs 3.5 msec per byte ande adds an additional 8mA to the ProMini’s normal 5mA operating current
     }
 
 // save new 80-character Hardware details to EEprom (serial input buffer limits you to only 80 characters input)
-//for (uint16_t i = 0; i < command.length(); i++){
   for (uint16_t i = 0; i < byteBuffer1; i++){
-    //EEPROM.update(i+156,command.charAt(i));
-    EEPROM.update(i+156,receivedChars[i]);
-    //if ((i % 16) == 0){Serial.print(F("."));}
+    EEPROM.update(i+165,receivedChars[i]);
     Serial.print(F("."));
     delay(4);
     }
@@ -1917,6 +1952,41 @@ for (uint16_t h = 156; h < 257; h++){         // EEPROM.update does not write ne
   Serial.println(receivedChars);Serial.flush();
   return;
 }// end startMenu_updateDeploymentInfo
+
+
+void startMenu_restoreStartValuesFromBackup(){        // this option NOT DISPLAYED in the start menu - only used when fixing a dead logger
+//--------------------------------------------------------------------------------------------------
+    Serial.println(F("Restoring Logger Parameters from external BACKUP cannot be undone! Proceed? y/n"));
+    while(Serial.available()) { byteBuffer1 = Serial.read();}   // clears any leftover bytes in serial buffer
+    
+    Serial.setTimeout(1000);
+    booleanBuffer = true;   byteBuffer1 = 0;
+    while (booleanBuffer) {
+        if (Serial.available()) byteBuffer1 = Serial.read();  //.read captures only ONE character at a time from the serial monitor window
+        
+        switch (byteBuffer1) {
+          case 'y': 
+            Wire.beginTransmission(EEpromI2Caddr);          
+            Wire.write(0); Wire.write(0);               // two bytes to specify the external eeprom address
+            Wire.endTransmission();
+            Wire.requestFrom(EEpromI2Caddr,(uint8_t)64);
+            for (uint8_t h=0; h<64; h++){
+              byteBuffer2 = Wire.read();
+              EEPROM.write(h, byteBuffer2);    // BLOCKING about 4ms per byte (addr, val);
+             }
+            Serial.println(F("328p startup values RESTORED from BACKUP on external EEprom")); Serial.flush();
+            booleanBuffer = false; break;
+
+          case 'n': 
+            Serial.println(F("Restore NOT done.")); Serial.flush();
+            booleanBuffer = false; break;  // return;
+            
+          default: 
+            break;
+          }       // terminates switch case
+      }           // terminates while(booleanBuffer)     
+}                 // terminatesvoid _restoreStartValuesFromBackup
+
 //==========================================================================================
 //==========================================================================================
 //   *  *   *  *  *  *  * FUNCTIONS called by the Main loop()  *  *  *  *  *  *  *  *  *  *
