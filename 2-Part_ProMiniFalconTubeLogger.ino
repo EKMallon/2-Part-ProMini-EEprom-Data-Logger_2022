@@ -1,6 +1,5 @@
 // 2-Part logger code by Edward Mallon - modified 2023 for e360 course at Northwestern University
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
-
 /*
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from the Cave Pearl Project. 
 The goal is to provide a starting point for self-built student projects in environmental monitoring.
@@ -78,7 +77,7 @@ const char compileDate[] PROGMEM = __DATE__;  //  built-in function in C++ makes
 const char compileTime[] PROGMEM = __TIME__;  //  built-in function in C++ makes text string: 10:04:18
 
 uint8_t bytesPerRecord = 0;                   // INCREMENTED at the beginning of setup to match #defined sensors. MUST divide evenly into EEprom Page buffer AND fit inside I2C buffer
-uint32_t EEmemoryPointr = 0;                  // counter that advances through the EEprom memory locations by bytesPerRecord at each pass through the main loop
+uint32_t EEmemoryPointr = 64;                  // counter that advances through the EEprom memory locations by bytesPerRecord at each pass through the main loop
 
 //defines & variables for ADC & readbattery() function
 //------------------------------------------------------------------------------
@@ -377,7 +376,7 @@ do { command = Serial.readStringUntil('\n');                  // read serial mon
       Serial.print(F("Erasing EEprom: Stay on UART power until done"));
       //------------------------------------------------------------------------------
                 
-      for (uint32_t memoryLocation=0; memoryLocation<EEbytesOfStorage; memoryLocation+=16){  // loop writes 16-bytes at a time into the I2C buffer
+      for (uint32_t memoryLocation=64; memoryLocation<EEbytesOfStorage; memoryLocation+=16){  // loop writes 16-bytes at a time into the I2C buffer
           Wire.beginTransmission(EEpromI2Caddr);
           Wire.write(highByte(memoryLocation));               // sends only the HiByte of the 2-byte integer address
           Wire.write(lowByte(memoryLocation));                // send only the LowByte of the address
@@ -1584,7 +1583,7 @@ void startMenu_sendData2Serial(boolean convertDataFlag){ // called at startup vi
         }
         
   uint32_t startMillis = millis();                      // track how long it takes for the data download   
-  EEmemoryPointr = 0;                             // a counter that advances through the EEprom Memory in bytesPerRecord increments
+  EEmemoryPointr = 64;                             // a counter that advances through the EEprom Memory in bytesPerRecord increments
     
 
   do{    // this big do-while loop readback must EXACTLY MATCH the data saving pattern in our main loop:
@@ -1746,7 +1745,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
 
   Serial.print(F("Download took: "));Serial.print((millis() - startMillis));Serial.println(F(" msec"));
   Serial.flush();
-  EEmemoryPointr = 0;                         // reset back to startup default for the main loop
+  EEmemoryPointr = 64;                         // reset back to startup default for the main loop
 }  // terminates sendData2Serial() function
 
 void startMenu_updateLoggerInfo(){
