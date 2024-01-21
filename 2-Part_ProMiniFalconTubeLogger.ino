@@ -1,5 +1,6 @@
 // 2-Part logger code by Edward Mallon - modified 2023 for e360 course at Northwestern University
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
+
 /*
 This program supports an ongoing series of DIY 'Classroom Logger' tutorials from the Cave Pearl Project. 
 The goal is to provide a starting point for self-built student projects in environmental monitoring.
@@ -26,11 +27,11 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 
 // LowestBattery & RTC_Temperature are the 2 byte 'base values' which are generally recorded with every sensor reading (as they require no extra sensor hardware beyond the logger itself)
 //#define logLowestBattery                  // 1-byte (compressed): saves LowestBattery recorded during operation
-#define logRTC_Temperature                  // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
+//#define logRTC_Temperature                  // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
 
 //#define countPIReventsPerSampleInterval   // 2-bytes:  saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersSensorReadings - choose one or the other
 
-//#define ReadNTC_6ref7ntc                  // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+#define ReadNTC_6ref7ntc                  // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
 //#define ReadLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                             // OLDER unit Configuration:  10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9
 
@@ -41,7 +42,7 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 //#define recordBMPaltitude                 // 2-bytes
 
 //#define logCurrentBattery on              // 2-byte: saves CurrentBattery in sensor records - could be compressed...
-//#define Si7051_Address 0x40               // 2-bytes: si7051 is often used for NTC calibration
+#define Si7051_Address 0x40               // 2-bytes: si7051 is often used for NTC calibration
 
 //#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - requires 1000uF rail capacitor!-
 
@@ -1530,7 +1531,8 @@ void startMenu_sendData2Serial(boolean convertDataFlag){ // called at startup vi
 // ADD HEADER information to top rows of serial output:
   setup_sendboilerplate2serialMonitor(); // a description of the deployment should be part of the data output
   //Serial.println(F("Convert Unixtime to Excel Dates with = UnixTime/#secondsInaDay + DATE(1970,1,1) "));
-
+  
+if (convertDataFlag){                   // don't print these headers if sending RAW bytes as output
   Serial.print(F("UnixTime,"));  
 
   #ifdef logLowestBattery
@@ -1567,7 +1569,10 @@ void startMenu_sendData2Serial(boolean convertDataFlag){ // called at startup vi
         Serial.print(F("SI7051[°C],"));
         #endif
 
- Serial.println();Serial.flush();
+}else{
+  Serial.print(F("ALL memory locations from EEprom as RAW byte values:"));
+  } //terminates if(convertDataFlag)
+  Serial.println();Serial.flush();
 
 //starting time value was stored in first four bytes of the 328p internal eeprom:
   uint32_t unix_timeStamp;
@@ -1589,9 +1594,12 @@ void startMenu_sendData2Serial(boolean convertDataFlag){ // called at startup vi
   do{    // this big do-while loop readback must EXACTLY MATCH the data saving pattern in our main loop:
   //---------------------------------------------------------------------------------------------------------- 
   
-  //if the first byte readback process is ZERO then we've reached our end of data marker
-  byteBuffer1 = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); 
-  if(byteBuffer1==0 & convertDataFlag){break;}              // this breaks us out of the do-while readback loop
+  byteBuffer2 = 0; //if the 1st & 2nd bytes in the record readback as ZERO then we've reached our end of data in the EEprom
+  byteBuffer1 = i2c_eeprom_read_byte(EEpromI2Caddr, EEmemoryPointr);    // uint8_t i2c_eeprom_read_byte
+  if((EEmemoryPointr+1) < EEbytesOfStorage){
+    byteBuffer2 = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr+1); 
+    }
+  if(byteBuffer1==0 && byteBuffer2==0 && convertDataFlag){ break;}     // this breaks us out of the do-while readback loop
 
 if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [with no timestamp] // this is ONLY used for debugging
         for (uint8_t j = 0; j < bytesPerRecord; j++) {
@@ -2455,8 +2463,6 @@ void ConditionCapacitorOnD8(){            // 2023-06-20: internal pullup resisto
   LowPower.powerDown(SLEEP_15MS, ADC_ON, BOD_OFF); // + extra 2msec for osc start! //ADC_ON leaves the already sleeping ACD alone as is
   // NOTE: 15MS is overkill:  5T with 300ohm&105(1uF) is 1.5 msec, with 300Ω&104(100nF) 5RC is only 0.15ms 
   bitClear(DDRB,0);  // pinMode(8,INPUT); 
-  // could insert the timer2 delays here from void Write_i2c_eeprom_array 
-  // to make this dischage faster? but that works in sleep mode IDLE?
 
     //re-enable timers
     power_timer1_disable();    // no longer need Timer1
