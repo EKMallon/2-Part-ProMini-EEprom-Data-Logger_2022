@@ -104,6 +104,8 @@ uint16_t t_year;                              //current year //note: yOff = raw 
 uint8_t Alarmday,Alarmhour,Alarmminute,Alarmsecond; // calculated variables for setting next alarm
 volatile boolean rtc_INT0_Flag = false;       // used in startup time sync delay //volatile because it's changed in an ISR // rtc_d2_alarm_ISR() sets this boolean flag=true when RTC alarm wakes the logger
 float rtc_TEMP_degC = 0.0;
+bool stopRTCoscillator = false;
+bool DS3231_PowerLossFlag = false;
 
 // temporary 'buffer' variables only used during calculations
 //------------------------------------------------------------------------------
@@ -299,7 +301,8 @@ void setup () {
 // Configure the DS3231 Real Time Clock control registers for coincell powered operation
 //------------------------------------------------------------------------------------------------------------
   Wire.begin();                                     // Start the I2C bus // enables internal 30-50k pull-up resistors on SDA & SCL by default
-  
+
+  DS3231_PowerLossFlag = i2c_readRegisterByte(DS3231_ADDRESS, DS3231_STATUS_REG) >> 7; //0Fh BIT 7 is OSF: Oscillator Stopped Flag
   // i2c_setRegisterBit function requires: (deviceAddress, registerAddress, bitPosition, 1 or 0)
   i2c_setRegisterBit(DS3231_ADDRESS, DS3231_STATUS_REG, 3, 0);  // disable the 32khz output  pg14-17 of datasheet  // This does not reduce the sleep current but can't run because we cut VCC
   i2c_setRegisterBit(DS3231_ADDRESS, DS3231_CONTROL_REG, 6, 1); // 0Eh Bit 6 (Battery power ALARM Enable) - MUST set to 1 for wake-up alarms when running from the coincell bkup battery
@@ -1005,9 +1008,9 @@ void loop(){
 // the coincell battery experiences a SIGNIFICANT VOLTAGE DROP due to its internal resistance during this load
 //-------------------------------------------------------------------------------
 
-  do{ }while(bit_is_set(ADCSRA,ADSC));  // throw away the first ADC reading
-  bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC)); uint16_Buffer=ADC;
-  ADCSRA = 0; power_adc_disable();                      // turn off ADC
+    do{}while(bit_is_set(ADCSRA,ADSC));     //throw away the first reading
+    bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC)); uint16_Buffer = ADC;
+    ADCSRA = 0; power_adc_disable();
 
 // CRITICAL understanding: EEproms are VERY sensitive to voltage fluctuations during the save and will HANG if you do much
 // WARNING: do not attempt EEprom Polling here - the I2C exchange draws FAR MORE CURRENT than the save process does
@@ -1161,12 +1164,12 @@ void loop(){
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ 
 
   if (LowestBattery <= systemShutdownVoltage){
-      error_shutdown(); // shutdown down the logger
+      stopRTCoscillator=true; error_shutdown(); // shutdown down the logger
       } 
   
   EEmemoryPointr = EEmemoryPointr + bytesPerRecord;     //advances our memory pointer for the next loop
   if( EEmemoryPointr >= EEbytesOfStorage){              // if eeprom memory is full
-      error_shutdown();                                 // shutdown down the logger
+      stopRTCoscillator=true; error_shutdown();                                 // shutdown down the logger
       }
 
 #ifdef countPIReventsPerSampleInterval                            //Logger can be woken by D2 AND D3 interrupt events
@@ -1450,7 +1453,9 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
     Serial.println();
     
     Serial.println();
-    Serial.println(F("Select one of the following options:"));
+    if (DS3231_PowerLossFlag){ //Oscillator Stop Flag (OSF). A logic 1 in bit7 indicates that the oscillator is stopped or was stopped for some period due to power loss
+    Serial.print(F("**** Set the CLOCK time! ****   RTC Oscillator Stop detected!"));
+    }else{Serial.print(F("Select one of the following options:"));}
     Serial.println(F("  [1] DOWNLOAD Data"));
     Serial.println(F("  [2] Set CLOCK       [3] Set INTERVAL    [4] DEPLOYMENT info"));
     Serial.println(F("  [5] Logger Details  [6] Cal. Constants  [7] Change Vref"));
@@ -1533,6 +1538,7 @@ void startMenu_setRTCtime(){
     Serial.print(F("Clock updated by "));Serial.print(int32_Buffer);Serial.print(F(" seconds"));
     delay(15);                                          // more RTC register memory write-time
     i2c_setRegisterBit(DS3231_ADDRESS,DS3231_STATUS_REG,7,0); //clear the OSF flag after time is set
+    DS3231_PowerLossFlag=false;
     }   //terminates if (set_t_month==0 && set_t_day==0){
 
 }
@@ -2129,7 +2135,7 @@ uint16_t readBattery(){                                 // reads 1.1vref as inpu
         if(ECHO_TO_SERIAL){
           Serial.print(railvoltage); Serial.println(F(" battery voltage too low!")); Serial.flush();
         }
-      error_shutdown();}                                // this shuts down the logger
+      stopRTCoscillator=true; error_shutdown();}                                // this shuts down the logger
          
   return railvoltage; 
 }  // terminator for readBattery()
@@ -2168,6 +2174,15 @@ void error_shutdown() {
     bitSet(EIFR,INTF0);                               // clear flag for interrupt 0  see: https://gammon.com.au/interrupts
     bitSet(EIFR,INTF1);                               // clear flag for interrupt 1
     interrupts (); 
+  // NOTE: I have found that even with BBSQW set to ZERO the RTC continues to assert an alarm on SQW!
+  // when an alarm is triggered, the INT/SQW pin goes low, and it stays that way until the appropriate register is cleared in the DS3231
+  // this results in ~700uA drain through the pullup AFTER shutdown which depletes the coincell battery
+  // STOPPING THE RTC OSCILATOR was the only way to prevent those eventual alarms from pulling SQW low:
+  // doing this will require the clock time to be reset @ the next startup!
+  if ((!ECHO_TO_SERIAL)&&(stopRTCoscillator)){                                            // this lowers most loggers from ~2uA to less than 1uA sleep current
+    i2c_setRegisterBit(DS3231_ADDRESS, DS3231_CONTROL_REG, 7, 1);  // When EOSC set to logic 1, the oscillator is stopped when DS3231 is on VBAT power.
+    }   // DS3231_CONTROL_REG Bit 7: Enable Oscillator (EOSC).  This bit is cleared (to logic 0) at the start of our code
+        // Note: Status Register (0Fh) bit 7 Oscillator Stop Flag (OSF) gets set to 1 any time that the oscillator stops
   
    bitSet(ACSR,ACD);                                 // Disable the analog comparator by setting the ACD bit (bit 7) of the ACSR register to one.
    ADCSRA = 0; SPCR = 0;                             // 0 Disables ADC & SPI // only use PRR after disabling the peripheral clocks, otherwise the ADC gets "frozen" in an active state drawing power
@@ -2348,8 +2363,8 @@ static uint16_t rtc_date2days(uint16_t y, uint8_t m, uint8_t d) {
   uint16_t days = d;
   for (uint8_t i = 1; i < m; ++i)
     days += pgm_read_byte(rtc_days_in_month + i - 1);
-  if (m > 2 && (y % 4 == 0)) // modulo checks (if is LeapYear) add extra day
-    ++days;
+    
+  if (m > 2 && (y % 4 == 0)){++days;} // if LeapYear add extra day
   return days + 365 * y + (y + 3) / 4 - 1;
 }
 
