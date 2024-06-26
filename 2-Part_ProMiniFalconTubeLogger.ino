@@ -925,8 +925,8 @@ void loop(){
 
 #ifdef ReadNTC_6ref7ntc
 //------------------
-  loByte = lowByte(NTC_NewReading);          // first byte of record gets checked by 
-  //if(loByte<1){loByte=1;}                     // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
+  loByte = lowByte(NTC_NewReading);             // first byte of record gets checked by 
+  if(loByte<1){loByte=1;}                       // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
         Wire.write(loByte);
   hiByte = highByte(NTC_NewReading);
         Wire.write(hiByte);  
@@ -934,7 +934,7 @@ void loop(){
 
 #ifdef ReadLDR_onD9
 //------------------
-  loByte = lowByte(LDR_NewReading);          // first byte of record gets checked by 
+  loByte = lowByte(LDR_NewReading);             // first byte of record gets checked by 
   //if(loByte<1){loByte=1;}                     // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
         Wire.write(loByte);
   hiByte = highByte(LDR_NewReading);
