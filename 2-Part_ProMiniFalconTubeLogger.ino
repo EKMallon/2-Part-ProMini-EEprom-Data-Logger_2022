@@ -19,38 +19,35 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-//#define PIRtriggersSensorReadings      // 4-bytes: Still in beta!   Do not enable this with PIRcountTriggerEvent - choose one or the other
-// does NOT use the regular RTC-alarm based sampling interval but instead records the seconds elapsed between EVERY PIR trigger event in a uint32_t long variable [uint16_t would overflow at ~18 hours]
-// WARNING this can use alot of memory very quickly! - reccomend use with larger eeprom memory
-// PIRtriggersSensorReadings could be enabled with four other bytes of sensor data [for a total of 8 bytes per record] OR with another 12 bytes of sensor data for a total of 16 bytes per record.
-
 // LowestBattery & RTC_Temperature are the 2 byte 'base values' which are generally recorded with every sensor reading (as they require no extra sensor hardware beyond the logger itself)
 #define logLowestBattery                  // 1-byte (compressed): saves LowestBattery recorded during operation
-#define logRTC_Temperature                  // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
+#define logRTC_Temperature                // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
+//#define logCurrentBattery                 // 2-byte: rarely used - not 1byte compressed like LowestBattery, primarily for powers-of-2 balancing
 
-//#define countPIReventsPerSampleInterval   // 2-bytes:  saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersSensorReadings - choose one or the other
+//#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+//#define readLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
+                                            // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
+//#define readSi7051_Temperature            // 2-bytes: often used for NTC calibration - does not require a library, functions for si7051 at end of program
 
-//#define ReadNTC_6ref7ntc                  // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
-//#define ReadLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
-                                            // OLDER unit Configuration:  10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9
+//#define readBh1750_LUX                    // 2-bytes: raw sensor output: gets converted to Lux during download
 
-//#define bh1750_Address 0x23               // 2-bytes: raw sensor output: gets converted to Lux during download
+//#define readBMP_Temperature               // 2-bytes
+//#define readBMP_Pressure                  // 2-bytes
+//#define recordBMPaltitude                 // 2-bytes: calculated by library
 
-//#define recordBMPtemp                     // 2-bytes
-//#define recordBMPpressure                 // 2-bytes
-//#define recordBMPaltitude                 // 2-bytes
-
-//#define logCurrentBattery on              // 2-byte: saves CurrentBattery in sensor records - could be compressed...
-//#define Si7051_Address 0x40               // 2-bytes: si7051 is often used for NTC calibration
-
-//#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - requires 1000uF rail capacitor!-
+//#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - Generates noise on rails, requires 1000uF rail capacitor!-
 
 #define EEpromI2Caddr 0x57                  // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
-#define EEbytesOfStorage 4096              // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
+#define EEbytesOfStorage 4096               // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
                                             // OR AT24c512 (via chip swap) 64k: 0x50 & 65536
+#define LED_GndGB_A0_A2                     // (DEFAULT) note Red on d13 left in place, A0gnd Green A1, blue A2
+//#define LED_r9_b10_g11_gnd12 installed    // 360 logger config: enables code for RGB indicator LED //1k limit resistor on shared GND line! // Red LED on D13 gets used as indicator if this #define is commented out
 
-//#define LED_r9_b10_g11_gnd12 installed    // enables code for RGB indicator LED //1k limit resistor on shared GND line! // Red LED on D13 gets used as indicator if this #define is commented out
-#define LED_GndGB_A0_A2                     // default Red on d13 left in place, A0gnd Green A1, blue A2
+//#define countPIReventsPerSampleInterval   // 2-bytes:  saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersSensorReadings - choose one or the other
+//#define PIRtriggersSensorReadings      // 4-bytes: Still in beta!   Do not enable this with PIRcountTriggerEvent - choose one or the other
+// does NOT use the regular RTC-alarm based sampling interval but instead records the seconds elapsed between EVERY PIR trigger event in a uint32_t long variable [uint16_t would overflow at ~18 hours]
+// WARNING this can use alot of memory very quickly! - recomend use with larger eeprom memory
+// PIRtriggersSensorReadings could be enabled with four other bytes of sensor data [for a total of 8 bytes per record] OR with another 12 bytes of sensor data for a total of 16 bytes per record.
 
 #include <Wire.h>       // I2C bus coms library: RTC, EEprom & Sensors
 #include <EEPROM.h>     // note: requires default promini bootloader (ie NOT optiboot)
@@ -140,42 +137,44 @@ uint16_t d3_INT1_eventCounter = 0;   //not used in this case but left in for com
 volatile boolean d3_INT1_Flag = false; 
 #endif
 
-#ifdef ReadNTC_6ref7ntc 
+#ifdef readNTC_D6refD7ntc 
 //------------------
-  uint32_t NTC_NewReading;                // max of 65535 limits our ability to measure 10kNTC at temps below zero C!
+  uint32_t NTC_NewReading;                  // max of 65535 limits our ability to measure 10kNTC at temps below zero C!
 #endif
 
-#ifdef ReadLDR_onD9 
+#ifdef readLDR_onD9 
 //------------------
-  uint32_t LDR_NewReading;                // 65535 limit
+  uint32_t LDR_NewReading;                  // 65535 limit
 #endif
-#if defined(ReadNTC_6ref7ntc) || defined(ReadLDR_onD9)
+#if defined(readNTC_D6refD7ntc) || defined(readLDR_onD9)
 //------------------------------------------------
   #define referenceResistorValue 10000UL    //  ARBITRARY value that should be 'close' to actual but precise value is not required  //https://hackingmajenkoblog.wordpress.com/2016/08/12/measuring-arduino-internal-pull-up-resistors/
   volatile boolean triggered;               //  volatiles needed for all digital pin reading of resistance:        
   volatile uint16_t timer1CounterValue;     //  prepareForInterrupts(), ISR (TIMER1_OVF_vect), ISR (TIMER1_CAPT_vect),ReadD6riseTimeOnD8
 #endif
 
-#ifdef bh1750_Address 
+#ifdef readBh1750_LUX 
 //------------------------------------------------------------------------------
   #include <hp_BH1750.h>                    // from  https://github.com/Starmbi/hp_BH1750 returns the sensor to sleep automatically after each read & supports auto-ranging.
   hp_BH1750 bh1750;                         // Instantiate a BH1750FVI library object
-  int16_t lux_BH1750_RawInt;               // raw reading before conversion to lux // 2-byte, 0 to 65535
+  int16_t lux_BH1750_RawInt;                // raw reading before conversion to lux // 2-byte, 0 to 65535
+  #define Bh1750_Address 0x23
 #endif
 
-#if defined(recordBMPtemp) || defined(recordBMPpressure) || defined(recordBMPaltitude)
+#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude)
 //-----------------------------------------------------------------------------------
-  #include <BMP280_DEV.h>                 // Include the BMP280_DEV.h library  // NOTE: this library has disappeared from github?
-  BMP280_DEV bmp280;                      // Instantiate (create) a BMP280_DEV object and set-up for I2C operation
+  #include <BMP280_DEV.h>                   // Include the BMP280_DEV.h library  // NOTE: this library has disappeared from github?
+  BMP280_DEV bmp280;                        // Instantiate (create) a BMP280_DEV object and set-up for I2C operation
   #define BMP280_Address 0x76
   float Bmp280_Temp_degC, Bmp280_Pr_mBar, Bmp280_altitude_m;  // Variables for sensor output
 #endif
 
-#ifdef Si7051_Address 
+#ifdef readSi7051_Temperature 
 //------------------------------------------------------------------------------
   // we are not using a library - init and read functions for si7051 at end of program
   uint16_t TEMP_si7051=0;                  //NOTE sensors output overruns this uint16_t at 40C!
   #define Si7051_Resolution 0b00000000       // 0b00000000 = 14-bit (0.01 C rez), 13 bit = 0b10000000 (0.02 C rez), 12 bit = 0b00000001 (0.04 C rez),11 bit = 0b10000001 (0.08 C rez)
+  #define Si7051_Address 0x40
 #endif
 
 #ifdef OLED_64x32_SSD1306
@@ -221,21 +220,21 @@ void setup () {
     bytesPerRecord = bytesPerRecord + 4;            //  4-byte integer: d3_INT1_elapsedSeconds
   #endif
   
-  #ifdef ReadNTC_6ref7ntc 
+  #ifdef readNTC_D6refD7ntc 
     bytesPerRecord = bytesPerRecord + 2;            //  two-byte integer: NTC ohms
   #endif
-  #ifdef ReadLDR_onD9
+  #ifdef readLDR_onD9
     bytesPerRecord = bytesPerRecord + 2;            //  two-byte integer: LDR ohms
   #endif
 
-  #ifdef bh1750_Address
+  #ifdef readBh1750_LUX
     bytesPerRecord = bytesPerRecord + 2;           // two-byte integer for RAW reading before conversion to lux
   #endif
   
-  #ifdef recordBMPtemp
+  #ifdef readBMP_Temperature
     bytesPerRecord = bytesPerRecord + 2;            // two-byte integer 
   #endif
-  #ifdef recordBMPpressure
+  #ifdef readBMP_Pressure
     bytesPerRecord = bytesPerRecord + 2;            // two-byte integer 
   #endif
   #ifdef recordBMPaltitude
@@ -245,7 +244,7 @@ void setup () {
   #ifdef logCurrentBattery
     bytesPerRecord = bytesPerRecord + 2;            // two-byte integer
   #endif
-  #ifdef Si7051_Address
+  #ifdef readSi7051_Temperature
     bytesPerRecord = bytesPerRecord + 2;            // two-byte integer  
   #endif
   
@@ -255,8 +254,9 @@ void setup () {
    
     pinMode(13, INPUT);       // turn of D13 onboard red LED by setting D13 to INPUT & LOW
 #ifdef LED_r9_b10_g11_gnd12                       // we will use INPUT & PULLUP resistor to PIP the leds to reduce current
-    for (int i = 9; i <=12; i++) { digitalWrite(i, LOW);  pinMode(i, INPUT); }
+    for (int i = 9; i <=12; i++) { pinMode(i, INPUT); digitalWrite(i, LOW);   }
     pinMode(12, OUTPUT);                            //the common ground line on our RGB led must OUTPUT to allow current
+    digitalWrite(A0,LOW);digitalWrite(A1,LOW);digitalWrite(A2,LOW);
     #endif
     
 #ifdef LED_GndGB_A0_A2
@@ -276,13 +276,13 @@ void setup () {
 
 // ADC Configuration: default & modified control register settings saved into storage variables
 //------------------------------------------------------------------------------------------------------------
-// A3..A0 - make sure pullups are OFF so they dont interefere with ADC readings // ignore A4/5 because I2C bus has hardware pullups (on RTC module)
-   digitalWrite(A0,LOW);digitalWrite(A1,LOW);digitalWrite(A3,LOW);
-
 #ifndef LED_GndGB_A0_A2
-   DIDR0 = 0x0F;                                    // diconnects the DIGITAL inputs sharing analog pins 0..3 (but NOT on 4&5 which are used by I2C as digital pins) //Once disabled, a digitalRead on those pins will always return zero.
-#endif                                              // Digital input circuits can 'leak' a relatively high amount of current if the analog input is approximately half-Vcc 
+  bitSet (DIDR0, ADC0D);  // disable digital input on A0
+  bitSet (DIDR0, ADC1D);  // disable digital input on A1
+  bitSet (DIDR0, ADC2D);  // disable digital input on A2                                             // Digital input circuits can 'leak' a relatively high amount of current if the analog input is approximately half-Vcc 
+#endif
 
+  digitalWrite(A3,LOW); bitSet (DIDR0, ADC3D);      // disable digital input on A3
   analogReference(DEFAULT); analogRead(A3);         // sets the ADC channel to A3 input pin
   default_ADCSRA = ADCSRA; default_ADMUX = ADMUX;   // Saves the DEFAULT ADC control registers into byte variables so we can restore those ADC control settings later
 
@@ -422,12 +422,12 @@ Serial.print(F("Initializing sensors: "));Serial.flush();
 // often wrapped with    #ifdef Sensor_Address  ...  #endif statements
 // RTC is already initialized in setup!
 
-// no initialization needed for ReadNTC_6ref7ntc or ReadLDR_onD9
+// no initialization needed for readNTC_D6refD7ntc or readLDR_onD9
 
 // BH1750 initialization
 //-----------------------
-#ifdef bh1750_Address             //using library:  https://github.com/Starmbi/hp_BH1750  
-  bh1750.begin(bh1750_Address); // set address & initialize
+#ifdef readBh1750_LUX             //using library:  https://github.com/Starmbi/hp_BH1750  
+  bh1750.begin(Bh1750_Address); // set address & initialize
       //bh1750.calibrateTiming();     // NOTE: ambient light must be at least 140 lux when calibrateTiming runs!
       //Serial.println(F("BH1750 light sensor MUST be exposed to >150 lux @ startup")); 
       //Serial.println(F("for self-cal or it may freeze randomly. 15 sec = minimum interval for this sensor"));Serial.println();Serial.flush();
@@ -440,7 +440,7 @@ Serial.print(F("Initializing sensors: "));Serial.flush();
 
 // BMP280 initialization
 //-----------------------
-#if defined(recordBMPtemp) || defined(recordBMPpressure) || defined(recordBMPaltitude)
+#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude)
   bmp280.begin(BMP280_Address);                             // or bmp280.begin(BMP280_I2C_ALT_ADDR); for sensors at 0x76
       //Options are OVERSAMPLING_SKIP, _X1, _X2, _X4, _X8, _X16 // pg 15 datasheet One millibar = 100 Pa
   bmp280.setPresOversampling(OVERSAMPLING_X4);
@@ -465,7 +465,7 @@ Serial.print(F("Initializing sensors: "));Serial.flush();
 
 #endif // terminates BMP280 init.
 
-#ifdef Si7051_Address
+#ifdef readSi7051_Temperature
 //--------------------
   initializeSI7051(); // we are not using a library so you can scroll down to read this function at the end of this program
   // if that function was in an #included library it would usually have an object .prefix something like:  si7051.initialize()
@@ -721,14 +721,14 @@ void loop(){
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#if defined(ReadLDR_onD9) || defined(ReadNTC_6ref7ntc)
+#if defined(readLDR_onD9) || defined(readNTC_D6refD7ntc)
 //------------------------------------------------
   ConditionCapacitorOnD8();                             // ConditionCapacitor only needs to be called ONCE before other ICU resistor readings
   //uint32_Buffer = ReadD8riseTimeOnD8();               // charge cycles the cap through D8 to standardize condition // AND it sets all pins with resistor/sensors connected to that common capacitor to input
   uint32_Buffer = ReadD6riseTimeOnD8();                 // loads elapsedTime for 10k ohm resistor
 #endif
 
-#ifdef ReadNTC_6ref7ntc
+#ifdef readNTC_D6refD7ntc
 //------------------
   NTC_NewReading = ReadD7riseTimeOnD8();                // a complex function at the end of this program
   NTC_NewReading = (referenceResistorValue * (uint32_t)NTC_NewReading) / uint32_Buffer;
@@ -737,7 +737,7 @@ void loop(){
     }  
 #endif
 
-#ifdef ReadLDR_onD9   
+#ifdef readLDR_onD9   
 //-------------------
   //LDR_NewReading = ReadD6riseTimeOnD8();
   LDR_NewReading = ReadD9riseTimeOnD8();
@@ -747,7 +747,7 @@ void loop(){
       }  
 #endif
 
-#ifdef bh1750_Address
+#ifdef readBh1750_LUX
 //-------------------
   bh1750.start(BH1750_QUALITY_LOW, BH1750_MTREG_LOW);   // triggers a new sensor reading
                                                         // LOW MTreg:31  resolution lux:7.4, 121557 is highest lux
@@ -762,22 +762,22 @@ void loop(){
       Serial.print(F(", Lux(calc): "));Serial.print(bh1750.calcLux(lux_BH1750_RawInt,BH1750_QUALITY_LOW,BH1750_MTREG_LOW),2);Serial.flush();
       //if you call calcLux() without Quality & MTreg, the parameters from the last measurement are used for the calculation
     }
-#endif //bh1750_Address
+#endif //readBh1750_LUX
 
 // read bmp280 sensor
 //-------------------
-#if defined(recordBMPtemp) || defined(recordBMPpressure) || defined(recordBMPaltitude) //  '||' means 'OR'
+#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude) //  '||' means 'OR'
   bmp280.startForcedConversion(); 
   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF); //NOTE: sleep time needed here depends on your oversampling settings
 #endif
 
-#ifdef recordBMPtemp
+#ifdef readBMP_Temperature
   bmp280.getCurrentTemperature(Bmp280_Temp_degC);
   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF);
   if(ECHO_TO_SERIAL){ Serial.print(F(" b280 Temp: ")); Serial.print(Bmp280_Temp_degC,2); Serial.print(F(" °C, ")); }
 #endif
 
-#ifdef recordBMPpressure
+#ifdef readBMP_Pressure
   bmp280.getCurrentPressure(Bmp280_Pr_mBar);
   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF);
   if(ECHO_TO_SERIAL){ Serial.print(F(" b280 Pr. "));Serial.print(Bmp280_Pr_mBar,2); Serial.print(F(" hPa, ")); }
@@ -790,7 +790,7 @@ void loop(){
 #endif
 // to read all three at the same time: bmp280.getCurrentMeasurements(Bmp280_Temp_degC, Bmp280_Pr_mBar, Bmp280_altitude_m); //function returns 1 if readings OK
 
-#ifdef Si7051_Address
+#ifdef readSi7051_Temperature
 //------------------------------------------------------------------------------
     TEMP_si7051 = readSI7051();                       // see functions at end of this program
         if(ECHO_TO_SERIAL){ 
@@ -923,34 +923,34 @@ void loop(){
   d3_INT1_eventCounter = 0;                            // after saving the data we can reset our event counter to zero
 #endif
 
-#ifdef ReadNTC_6ref7ntc
+#ifdef readNTC_D6refD7ntc
 //------------------
-  loByte = lowByte(NTC_NewReading);             // first byte of record gets checked by 
-  if(loByte<1){loByte=1;}                       // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
+  loByte = lowByte(NTC_NewReading);            // first byte of record gets checked by 
+  if(loByte<1){loByte=1;}                     // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
         Wire.write(loByte);
   hiByte = highByte(NTC_NewReading);
         Wire.write(hiByte);  
-#endif // #ifdef ReadNTC_6ref7ntc
+#endif // #ifdef readNTC_D6refD7ntc
 
-#ifdef ReadLDR_onD9
+#ifdef readLDR_onD9
 //------------------
-  loByte = lowByte(LDR_NewReading);             // first byte of record gets checked by 
-  //if(loByte<1){loByte=1;}                     // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
+  loByte = lowByte(LDR_NewReading);            // first byte of record gets checked by 
+  //if(loByte<1){loByte=1;}                   // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
         Wire.write(loByte);
   hiByte = highByte(LDR_NewReading);
         Wire.write(hiByte);  
-#endif // #ifdef ReadLDR_onD9
+#endif // #ifdef readLDR_onD9
 
-#ifdef bh1750_Address
+#ifdef readBh1750_LUX
 //--------------------
   loByte = lowByte(lux_BH1750_RawInt);          // first byte of record gets checked by 
   //if(loByte<1){loByte=1;}                     // -ONLY 1st byte of record -needs to preserve zero EOF indicator in 'empty' EEprom space
         Wire.write(loByte);
   hiByte = highByte(lux_BH1750_RawInt);
         Wire.write(hiByte);  
-#endif // #ifdef bh1750_Address
+#endif // #ifdef readBh1750_LUX
 
-#ifdef recordBMPtemp
+#ifdef readBMP_Temperature
   Bmp280_Temp_degC = Bmp280_Temp_degC*100.00;   //convert float reading to integer preserving two decimal places
   int16_Buffer = (int16_t)Bmp280_Temp_degC;  
   loByte = lowByte(int16_Buffer);              // first byte of record gets checked by 
@@ -960,7 +960,7 @@ void loop(){
         Wire.write(hiByte);  
 #endif
 
-#ifdef recordBMPpressure
+#ifdef readBMP_Pressure
   Bmp280_Pr_mBar = Bmp280_Pr_mBar*10.0;         //convert float reading to integer preserving ONE decimal place
   int16_Buffer = (int16_t)Bmp280_Pr_mBar;  
   loByte = lowByte(int16_Buffer);              // first byte of record gets checked by 
@@ -989,14 +989,14 @@ void loop(){
         Wire.write(hiByte);                   // 2nd byte of data added to I2C buffer 
 #endif //logCurrentBattery
 
-#ifdef Si7051_Address                         // stores the 'raw' 16-byte integer using two bytes (ie with no compression)
+#ifdef readSi7051_Temperature                         // stores the 'raw' 16-byte integer using two bytes (ie with no compression)
 //-----------------------------------------------------------------------------------------------------------------------
   loByte = lowByte(TEMP_si7051);              //NOTE TEMP_si7051 overruns this uint16_t if temps >40C!
         Wire.write(loByte);
   //if(loByte<1){loByte=1;}                   // ONLY THE FIRST data byte saved in each record must have a ZERO TRAP to preserve zero EOF indicators in EEprom
   hiByte =  highByte(TEMP_si7051); 
         Wire.write(hiByte);
-#endif //Si7051_Address
+#endif //readSi7051_Temperature
  
 
 //-------------------------------------------------------------------------------
@@ -1018,8 +1018,9 @@ void loop(){
 // (ALSO WAKING from sleep is multiplied when running at a slower clock speed and this can defeat the power savings slow sysclocks are combined with a sleep modes)
 
     if(EEbytesOfStorage==4096){  // battery recovery time from EEprom save event
-    LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF); //LowPower.idle fails with 4K eeproms!
-                                                      //also WORKS with THE 4k eeproms: LowPower.adcNoiseReduction(SLEEP_15MS, ADC_OFF, TIMER2_OFF);
+      //LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF); // LowPower.idle fails with 4K eeproms!
+      LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_ON);
+                                                        // also WORKS with THE 4k eeproms: LowPower.adcNoiseReduction(SLEEP_15MS, ADC_OFF, TIMER2_OFF);
     } else { // the 64k+ eeproms will ONLY WORK WITH SLEEP MODE IDLE here
       LowPower.idle(SLEEP_15MS, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_ON);
       // CRITICAL understanding: DO NOT TURN OFF THE I2C bus or Timer0 while the EEPROM is saving
@@ -1120,7 +1121,7 @@ void loop(){
   oled.set2X();oled.setCursor(32,6);oled.print(bmp280_temp,2);
   #endif //BMP280_Address
 
-  #ifdef ReadNTC_6ref7ntc
+  #ifdef readNTC_D6refD7ntc
   oled.setCursor(32,4);oled.print(F("NTC"));
   //oled.setCursor(56,5);oled.print(NTC_NewReading);
   
@@ -1133,7 +1134,7 @@ void loop(){
   oled.print(NTC_NewReading);
   #endif //ReadNTC
   
-  #ifdef ReadLDR_onD9
+  #ifdef readLDR_onD9
   oled.setCursor(32,6);oled.print(F("LDR"));
   oled.setCursor(56,7);oled.print(LDR_NewReading);
   #endif //ReadLDR
@@ -1207,23 +1208,35 @@ void loop(){
 //==========================================================================================
 void sleepNwait4RTCalarm() {                          //NOTE all existing pin states are preserved during sleep
 
-  pinMode(2,INPUT);                                  //D2 pullup off - not needed with hardware pullups on RTC module
-  
+  pinMode(2,INPUT);                                   //D2 pullup off - not needed with hardware pullups on RTC module
+
+  // FLOAT all pins changed nothing on high 100ua sleepers?
+  //for (uint8_t i = 2; i <=13; i++) { 
+  //      pinMode(i,INPUT);
+  //      }
+        
   noInterrupts();
   bitSet(EIFR,INTF0);                                 // clears interrupt 0's flag bit before attachInterrupt(0,isr,xxxx)
   attachInterrupt(0,rtc_d2_alarm_ISR,LOW);            // RTC alarm connected to pin D2 // LOW assures it will always respond if the RTC alarm is asserted
   interrupts();
-  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF); // ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
+  LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);// ADC_ON simply preserves whatever the current ADC status is (in our case it's already OFF...)
   
-  //HERE AFTER WAKING  // note that detachInterrupt(0); happened inside the ISR
+  //HERE AFTER WAKING  // note that detachInterrupt(0); happens inside the ISR
     
   Wire.beginTransmission(DS3231_ADDRESS);
   Wire.write(DS3231_STATUS_REG);
-  Wire.write(0);                                     // clearing the entire status register turns Off (both) RTC alarms though technically only the last two bits need to be set
+  Wire.write(0);                                      // clearing the entire status register turns Off (both) RTC alarms though technically only the last two bits need to be set
   Wire.endTransmission();
-  rtc_INT0_Flag = false;                             // clear the flag we use to indicate the RTC alarm occurred
+  rtc_INT0_Flag = false;                              // clear the flag we use to indicate the RTC alarm occurred
   LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);   // coincell voltage recovery time from Wakup & I2C transaction
-  
+/*
+  #ifdef LED_GndGB_A0_A2
+    bitClear(PORTC,0); bitSet(DDRC,0);              // A0 GND pin LOW & OUTPUT
+    #endif //LED_GndGB_A0_A2
+  #ifdef LED_r9_b10_g11_gnd12                       // we will use INPUT & PULLUP resistor to PIP the leds to reduce current
+    pinMode(12, OUTPUT);                            //the common ground line on our RGB led must OUTPUT to allow current
+    #endif
+*/    
 }  //terminator for sleepNwait4RTCalarm
 
 void rtc_d2_alarm_ISR() {                             // this function gets called by attachInterrupt above
@@ -1237,17 +1250,17 @@ void sleepNwait4D3InterruptORrtcAlarm(){
   // detachInterrupt(X); gets done inside the ISRx for each interrupt which also sets that flag true
   // but the other detachInterrupt(Y); has to be done manually based on those flags
 
-  pinMode(2,INPUT);                       //D2 INPUT & pullup not needed due to hardware pullups on RTC module
-  pinMode(3,INPUT);                       //D3 INPUT & pullup off - the PIR module is controlling the HIGH/LOW status of this input line
+  pinMode(2,INPUT);                        //D2 INPUT & pullup not needed due to hardware pullups on RTC module
+  pinMode(3,INPUT);                        //D3 INPUT & pullup off - the PIR module is controlling the HIGH/LOW status of this input line
   rtc_INT0_Flag = false;
   d3_INT1_Flag = false;
   
-  noInterrupts();                         // waking from two interrupt sources requries them to be 'nested'
+  noInterrupts();                          // waking from two interrupt sources requries them to be 'nested'
   
-  bitSet(EIFR,INTF0);                     // before attachInterrupt(0,isr,xxxx) you must clear int0 flag inside 328p processor
+  bitSet(EIFR,INTF0);                      // before attachInterrupt(0,isr,xxxx) you must clear int0 flag inside 328p processor
   attachInterrupt(0,rtc_d2_alarm_ISR,LOW); // RTC alarm on D2  // LOW assures it will always respond if the RTC alarm is asserted
 
-  bitSet(EIFR,INTF1);                     // clear int1 flag
+  bitSet(EIFR,INTF1);                      // clear int1 flag
   attachInterrupt(1,input_d3_interrupt_ISR,RISING);   //PIR drives its output line HIGH when it detects motion
   
   interrupts ();
@@ -1426,19 +1439,19 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
   #ifdef PIRtriggersSensorReadings
         Serial.print(F("PIR Triggers Reading,"));
         #endif
-  #ifdef ReadNTC_6ref7ntc
+  #ifdef readNTC_D6refD7ntc
       Serial.print(F("NTC[Ω],"));
       #endif
-  #ifdef ReadLDR_onD9
+  #ifdef readLDR_onD9
       Serial.print(F("LDR[Ω],"));
       #endif  
-  #ifdef bh1750_Address
+  #ifdef readBh1750_LUX
         Serial.print(F("Bh1750[Lux],"));
         #endif
-  #ifdef recordBMPtemp
+  #ifdef readBMP_Temperature
         Serial.print(F("b280[T°C],"));
       #endif
-  #ifdef recordBMPpressure
+  #ifdef readBMP_Pressure
         Serial.print(F("b280Pr[mbar],"));
         #endif
   #ifdef recordBMPaltitude
@@ -1447,7 +1460,7 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
   #ifdef logCurrentBattery
         Serial.print(F("C.Bat[mv],"));
         #endif
-  #ifdef Si7051_Address
+  #ifdef readSi7051_Temperature
         Serial.print(F("SI7051[°C],"));
         #endif
     Serial.println();
@@ -1564,19 +1577,19 @@ if (convertDataFlag){                   // don't print these headers if sending 
   #ifdef countPIReventsPerSampleInterval
         Serial.print(F("PIR count,"));
         #endif
-  #ifdef ReadNTC_6ref7ntc
+  #ifdef readNTC_D6refD7ntc
       Serial.print(F("NTC[Ω],"));
       #endif
-  #ifdef ReadLDR_onD9
+  #ifdef readLDR_onD9
       Serial.print(F("LDR[Ω],"));
       #endif 
-  #ifdef bh1750_Address
+  #ifdef readBh1750_LUX
         Serial.print(F("Bh1750[Lux],"));
         #endif
-  #ifdef recordBMPtemp
+  #ifdef readBMP_Temperature
         Serial.print(F("b280[T°C],"));
       #endif
-  #ifdef recordBMPpressure
+  #ifdef readBMP_Pressure
         Serial.print(F("b280Pr[mbar],"));
         #endif
   #ifdef recordBMPaltitude
@@ -1585,7 +1598,7 @@ if (convertDataFlag){                   // don't print these headers if sending 
   #ifdef logCurrentBattery
         Serial.print(F("C.Bat[mv],"));
         #endif
-  #ifdef Si7051_Address
+  #ifdef readSi7051_Temperature
         Serial.print(F("SI7051[°C],"));
         #endif
 
@@ -1678,7 +1691,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(uint16_Buffer-1);Serial.print(F(","));   // 'minus 1' because we added one as our zero trap before the count was saved
 #endif
 
-#ifdef ReadNTC_6ref7ntc
+#ifdef readNTC_D6refD7ntc
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
       EEmemoryPointr++;             
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
@@ -1687,7 +1700,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(uint16_Buffer);Serial.print(F(","));
 #endif
 
-#ifdef ReadLDR_onD9
+#ifdef readLDR_onD9
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
       EEmemoryPointr++;             
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
@@ -1703,7 +1716,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#ifdef bh1750_Address
+#ifdef readBh1750_LUX
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //low byte
       EEmemoryPointr++;
       lux_BH1750_RawInt = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //hi byte
@@ -1715,7 +1728,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
 #endif
 
 
-#ifdef recordBMPtemp           // Bmp280_Temp_degC, 2-bytes, low byte first
+#ifdef readBMP_Temperature           // Bmp280_Temp_degC, 2-bytes, low byte first
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //low byte
       EEmemoryPointr++;
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //hi byte
@@ -1725,7 +1738,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(floatBuffer,2);Serial.print(",");
 #endif
 
-#ifdef recordBMPpressure      // Bmp280_Pr_mBar, 2-bytes, low byte first
+#ifdef readBMP_Pressure      // Bmp280_Pr_mBar, 2-bytes, low byte first
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //low byte
       EEmemoryPointr++;
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr); //hi byte
@@ -1754,7 +1767,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(uint16_Buffer);Serial.print(F(","));
 #endif
 
-#ifdef Si7051_Address 
+#ifdef readSi7051_Temperature 
         loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
         EEmemoryPointr++;
         TEMP_si7051 = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemoryPointr);
@@ -1762,7 +1775,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
         TEMP_si7051 = (TEMP_si7051 << 8) | loByte;           // NOTE: no casting needed with hiByte loaded into TEMP_si7051 which is an integer variable
         Serial.print(((175.26*TEMP_si7051)/65536.0)-46.85,3);Serial.print(F(","));  //calculation is promoted to float by the decimal places
         //integer converted to celcius (3 decimals output)   //or Serial.print(TEMP_si7051); to print raw integer 
-#endif // #ifdef Si7051_Address
+#endif // #ifdef readSi7051_Temperature
 
   } //terminators if(convertDataFlag)
 
@@ -2391,7 +2404,7 @@ static uint16_t rtc_date2days(uint16_t y, uint8_t m, uint8_t d) {
 // code from https://github.com/closedcube/ClosedCube_Si7051_Arduino/blob/master/src/ClosedCube_Si7051.cpp
 // and we usually buy these sensors from ClosedCube on Tindie: https://www.tindie.com/stores/closedcube/
 
-#ifdef Si7051_Address  //compiler will include these functions up to the next #endif statement
+#ifdef readSi7051_Temperature  //compiler will include these functions up to the next #endif statement
 void initializeSI7051() {
 //---------------------------------------------------------------------------------------------
   if(ECHO_TO_SERIAL){
@@ -2449,7 +2462,7 @@ uint16_t readSI7051() {    //Conversion time: 14-bit temps = 10 ms @ 120 μA, pe
 // ========================================================================================
 
 
-#if defined(ReadLDR_onD9) || defined(ReadNTC_6ref7ntc)
+#if defined(readLDR_onD9) || defined(readNTC_D6refD7ntc)
 // ============================================================================================================
 // ===========================================================================================================
 // Based on Nick Gammon's frequency counter at https://www.gammon.com.au/forum/?id=11504
@@ -2544,7 +2557,7 @@ uint16_t ReadD6riseTimeOnD8(){
     power_twi_enable();        // cant use I2C bus without interrupts enabled
     if(ECHO_TO_SERIAL){ //#ifdef ECHO_TO_SERIAL
       power_usart0_enable();   
-      Serial.print(F(" D6: "));Serial.print(timer1CounterValue);Serial.println(F(" 10k Ref."));Serial.flush(); 
+      Serial.print(F(" D6: "));Serial.print(timer1CounterValue);Serial.print(F(" 10kRef."));Serial.flush(); 
     }//#endif
 
 return timer1CounterValue;                 // timer1CounterValue = ICR1; done inside ISR (TIMER1_OVF_vect) capped at 65534
@@ -2682,6 +2695,6 @@ ISR (TIMER1_OVF_vect) {           // timer1 overflows (every 65536 system clock 
 
 // ============================================================================================================
 // ============================================================================================================
-#endif //end of #if defined(ReadLDR_onD9) || defined(ReadNTC_6ref7ntc)
+#endif //end of #if defined(readLDR_onD9) || defined(readNTC_D6refD7ntc)
 // ============================================================================================================
 // ============================================================================================================
