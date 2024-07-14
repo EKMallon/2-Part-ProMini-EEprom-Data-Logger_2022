@@ -13,10 +13,10 @@ This 'low power' 2-module iteration runs the logger from a CR2032 coin cell and 
 Data download & logger control are managed  through the IDE's serial monitor window at 500000 baud. 
 The logger WILL NOT START taking readings until those serial handshakes are completed via the UART connection.<br/><br/>
 
-The most important rule to follow when adding new sensors is that the buffer arrays can only handle 'powers of 2' additions of 1, 2, 4, or 8 bytes.
+The most important rule to follow when adding new sensors is that the total bytes per saved record must be 1, 2, 4,8 or 16bytes.
 Odd byte quantities per sensor record (other than one) and you end up with page boundary issues in the EEprom.
 
 ---
 
-Note: This script will still run on the 3-module "Modules & Jumper Wires"  loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/18/2/530 
+Note: This script will still run on the older 3-module "Modules & Jumper Wires"  loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/18/2/530 
 and provides a 'no SD card' operation on the older 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/ but you will have to change the LED pins.
