@@ -13,7 +13,7 @@ This 'low power' 2-module iteration runs the logger from a CR2032 coin cell and 
 Data download & logger control are managed  through the IDE's serial monitor window at 500000 baud. 
 The logger WILL NOT START taking readings until those serial handshakes are completed via the UART connection.<br/><br/>
 
-The most important rule to follow when adding new sensors is that the total bytes per saved record must be 1, 2, 4,8 or 16bytes.
+The most important rule to follow when adding new sensors is that the total bytes per saved record must be 1, 2, 4, 8 or 16 bytes.
 Odd byte quantities per sensor record (other than one) and you end up with page boundary issues in the EEprom.
 
 ---
