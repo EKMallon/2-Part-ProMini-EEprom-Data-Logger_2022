@@ -13,7 +13,7 @@ This 'low power' 2-module iteration runs the logger from a CR2032 coin cell and 
 Data download & logger control are managed  through the IDE's serial monitor window at 500000 baud. 
 The logger WILL NOT START taking readings until those serial handshakes are completed via the UART connection.<br/><br/>
 
-<figure><img  align="right" width="400" height="240" src="images/20231128_e360_schematic_400x240.png"></figure>
+<figure><img  align="right" width="400" height="240" src="images/20240713_2PartLogger_schematic_400x240pixw.png"></figure>
 The code has support for a built-in NTC / LDR combination, Bmp280, BH1750, and PIR sensors. These are enabled / disabled by uncommenting define statements at the beginning of the code. Each sensor enabled after the single-byte LowBat & RTCtemp defaults contributes two additional bytes per sampling event because every sensor reading gets stored in a 16-bit integer. The total bytes per saved per record must total 1, 2, 4, 8 or 16 only. Modifying the logger base code for a new type of sensor requires edits only at the areas indicated by call out numbers on the following flow charts. These are labeled with comments: STEP1, STEP2, STEP3, etc. so you can locate those sections with the Find function in the IDE.  They are surrounded by rows of ++PLUS++ symbols:</br>
 >//++++++++++++++++++++++++++++++++++++++++++++++++++++</br>
 >// STEP1 : #include libraries & Declare Variables HERE</br>
