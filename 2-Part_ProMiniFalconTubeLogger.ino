@@ -77,7 +77,7 @@ const char compileTime[] PROGMEM = __TIME__;  //  built-in function in C++ makes
 uint8_t sensorBytesPerRecord = 0;             // INCREMENTED at the beginning of setup to match #defined sensors. MUST divide evenly into EEprom Page buffer AND fit inside I2C buffer
 uint32_t EEmemPointer = 64;                   // counter that advances through the EEprom memory locations by sensorBytesPerRecord at each pass through the main loop
 #define EEpromI2Caddr 0x57                    // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
-#define totalBytesOfEEpromStorage 4096                 // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
+#define totalBytesOfEEpromStorage 4096        // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
                                               // OR AT24c512 (via chip swap) 64k: 0x50 & 65536
 
 //defines & variables for ADC & readbattery() function
@@ -701,8 +701,10 @@ void loop(){
 #endif //terminates #ifdef PIRtriggersSensorReadings    
  
   if(ECHO_TO_SERIAL){
-      sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d:%02d", t_year, t_month, t_day, t_hour, t_minute,t_second);
-      Serial.println();Serial.print(F(">Logger woke at: ")); Serial.print(CycleTimeStamp); // sprintf ref:  http://www.perlmonks.org/?node_id=20519
+      Serial.println();Serial.print(F(">Wake: ")); 
+      Serial.print(t_year,DEC);Serial.print(F("/"));Serial.print(t_month,DEC);Serial.print(F("/"));Serial.print(t_day,DEC);
+      Serial.print(F(" "));Serial.print(t_hour,DEC);Serial.print(F(":"));Serial.print(t_minute,DEC);Serial.print(F(":"));Serial.print(t_second,DEC);
+
         #ifndef PIRtriggersSensorReadings
           Serial.print(F(" Next Alarm Set in: "));
           if (SampleIntervalSeconds > 0){ Serial.print(SampleIntervalSeconds); Serial.print(F("sec")); 
@@ -1439,24 +1441,37 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
 //-----------------------------------------------------------------------------------------
 
   Serial.println();
-  RTC_DS3231_getTime();                     // reads current clock time  and display it via CycleTimeStamp
-  sprintf(CycleTimeStamp, "%04d/%02d/%02d %02d:%02d", t_year, t_month, t_day, t_hour, t_minute);  //combines numeric time variables to a human readable text string
-  Serial.print(F("Current Logger time:"));Serial.print(CycleTimeStamp);Serial.print(F(":"));Serial.print(t_second); //seconds separate because usually value is zero
-  EEPROM.get(4,InternalReferenceConstant);
+  RTC_DS3231_getTime();                    // reads current clock time  and display it via CycleTimeStamp
+  Serial.print(t_year,DEC);Serial.print(F("/"));Serial.print(t_month,DEC);Serial.print(F("/"));Serial.print(t_day,DEC);
+  Serial.print(F(" Time: ")); Serial.print(t_hour,DEC);Serial.print(F(":"));Serial.print(t_minute,DEC);
+  Serial.print(F(":"));Serial.print(t_second,DEC); //seconds separate because usually value is zero
+  EEPROM.get(4,InternalReferenceConstant); // use .get for multi-byte variables
   Serial.print(F(", VREF: "));Serial.print(InternalReferenceConstant);
-  RTCagingOffset = EEPROM.read(10);
+  RTCagingOffset = EEPROM.read(10);        // use .read for single-byte reads
   Serial.print(F(", RTCage:"));Serial.println(RTCagingOffset);
-  if(ECHO_TO_SERIAL){
-  Serial.print(F("Serial output ON"));
-  }else{
-  Serial.print(F("Serial output OFF"));
-  } 
+  Serial.print(F("Serial "));
+  Serial.print(ECHO_TO_SERIAL ? "ON" : "OFF");
   SampleIntervalMinutes = EEPROM.read(8);
   SampleIntervalSeconds = EEPROM.read(9);
-  RTCagingOffset = EEPROM.read(10);
-  Serial.print(F(", Interval: "));Serial.print(SampleIntervalMinutes);Serial.print(F("m "));Serial.print(SampleIntervalSeconds);
-  Serial.print(F("s, RTCage:"));Serial.print(RTCagingOffset);
-  Serial.print(F(", Logging: "));
+  if (sensorBytesPerRecord &(sensorBytesPerRecord-1)){    //powers of two check - any non zero result is interpreted as 'true'
+    Serial.print(F("Bytes/record not a PowerOfTwo ->CHANGE sensor the config!"));
+    } else {
+    Serial.print(F("Runtime: "));Serial.print(totalBytesOfEEpromStorage);Serial.print(F("/"));Serial.print(sensorBytesPerRecord);
+    Serial.print(F(" recordBytes @ "));Serial.print(SampleIntervalMinutes);Serial.print(F("m "));
+    Serial.print(SampleIntervalSeconds);Serial.print(F("s = "));
+    floatBuffer = (totalBytesOfEEpromStorage/sensorBytesPerRecord)-64; // # records that can be stored = totalBytesOfEEpromStorage / sensor Bytes needed PerRecord
+    if (SampleIntervalMinutes==0){
+              floatBuffer = floatBuffer*SampleIntervalSeconds;
+              Serial.print(floatBuffer/60,0);Serial.print(F("m or "));
+              Serial.print(floatBuffer/3600,2);Serial.print(F("h"));
+            } else {
+              floatBuffer = floatBuffer*(60UL*SampleIntervalMinutes);
+              Serial.print(floatBuffer/3600,0);Serial.print(F("h or "));
+              Serial.print(floatBuffer/86400,2);Serial.print(F("d"));
+            }     
+      }
+      
+  Serial.println();Serial.print(F("Logging: "));
   #ifdef logLowestBattery
         Serial.print(F("LoBat[mv],"));
         #endif
@@ -1494,38 +1509,23 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
         Serial.print(F("SI7051[°C],"));
         #endif
     Serial.println();
-
-  if (sensorBytesPerRecord &(sensorBytesPerRecord-1)){  //any non zero result is interpreted as 'true'
-    Serial.print(F("*** BytesPerRecord is not a Power of Two! - CHANGE sensor configuration!"));
-    } else {
-    Serial.print(F("Run Time with "));Serial.print(totalBytesOfEEpromStorage);Serial.print(F(" bytes of storage: "));
-    floatBuffer = totalBytesOfEEpromStorage/sensorBytesPerRecord;         // # records that can be stored = totalBytesOfEEpromStorage / sensor Bytes needed PerRecord
-    if (SampleIntervalMinutes==0){                                  // TotalRunTimeInSeconds = #ofRecordsThatCanBeStored * seconds between each reading
-              floatBuffer = floatBuffer*SampleIntervalSeconds;
-              Serial.print(floatBuffer/60,0);Serial.print(F(" min. = "));
-              Serial.print(floatBuffer/3600,2);Serial.print(F(" hours"));
-            } else {
-              floatBuffer = floatBuffer*(60UL*SampleIntervalMinutes);
-              Serial.print(floatBuffer/3600,0);Serial.print(F(" hours = "));
-              Serial.print(floatBuffer/86400,2);Serial.print(F(" days"));
-            }     
-      }   //terminates } else {
-
-    Serial.println();Serial.println();
-    Serial.print(F("Select one of the following options:"));
-    if (DS3231_PowerLossFlag){ //Oscillator Stop Flag (OSF). A logic 1 in bit7 indicates that the oscillator was stopped for some period due to power loss
-    Serial.print(F("       ***Set the CLOCK!"));}
+       
     Serial.println();
-    Serial.println(F("  [1] DOWNLOAD Data    [2] Set CLOCK       [3] Set INTERVAL"));
-    Serial.println(F("  [4] Deployment info  [5] Logger Details  [6] Cal. Constants"));
-    Serial.println(F("  [7] Toggle Serial    [8] RTC Age Offset  [9] Change Vref"));
-    Serial.println(F("  [10] START logging"));
+    Serial.print(F("Select:"));
+    if(DS3231_PowerLossFlag){ //Oscillator Stop Flag (OSF). A logic 1 in bit7 indicates that the oscillator was stopped for some period due to power loss
+    Serial.print(F("  **Set the CLOCK**"));}
+    Serial.println();
+    Serial.println(F(" [1] DOWNLOAD Data    [2] Set CLOCK       [3] Set INTERVAL"));
+    Serial.println(F(" [4] Deployment info  [5] Logger Details  [6] Cal.Constants"));
+    Serial.println(F(" [7] Toggle Serial    [8] RTC Age Offset  [9] Change Vref"));
+    Serial.println(F(" [10] START logging"));
     if(ECHO_TO_SERIAL){
     Serial.println(F("Debugging/Test options:"));
     Serial.println(F("  [11] Download RAW EEprom bytes  [12] Restore328settingsfromEE"));
     }
     Serial.println(); Serial.flush();
 }   //terminates startMenu_printMenuOptions
+
 
 void startMenu_setRTCageOffset(){                           //default = 0 
 //-----------------------------------------------------------------------------------------
