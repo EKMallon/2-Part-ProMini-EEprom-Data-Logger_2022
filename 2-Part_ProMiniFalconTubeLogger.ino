@@ -1,4 +1,3 @@
-
 // 2-Part logger code by Edward Mallon - modified 2023 for e360 course at Northwestern University
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
 /*
@@ -28,7 +27,7 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 #define logRTC_Temperature                // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
 //#define logCurrentBattery                 // 2-byte: RARELY USED - not 1byte compressed like LowestBattery, primarily included as a powers-of-2 balancing option
 
-//#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
 //#define readLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                             // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
 //#define readSi7051_Temperature            // 2-bytes: often used for NTC calibration - does not require a library, functions for si7051 at end of program
@@ -1408,6 +1407,8 @@ void setup_displayStartMenu() {
             case 12:           
               startMenu_restoreStartValuesFromBackup(); Serial.setTimeout(1000);    // a 'hidden' option NOT DISPLAYED in the startmenu
               displayMenuAgain=true;  break;                // restores startup parameters from 64byte backup on external eeprom - useful if you have to replace a dead promini          
+            case 13: 
+              error_shutdown();                             // leaving the RTC oscilator running
             default:                                        // Check milliseconds elapsed & send logger into shutdown if we've waited too long
                 if ((millis() - uint32_Buffer) > 480000) {  // start menu has an 480000 = 8 minute timeout
                 Serial.println(F("Start Menu Timed out with NO commands!"));
@@ -1470,7 +1471,8 @@ void startMenu_printMenuOptions(){          // note: setup_sendboilerplate2seria
     Serial.println(F(" [10] START logging"));
     if(ECHO_TO_SERIAL){
     Serial.println(F("Debugging/Test options:"));
-    Serial.println(F("  [11] Download RAW EEprom bytes  [12] Restore328settingsfromEE"));
+    Serial.println(F(" [11] Download RAW EEprom bytes  [12] Restore328settingsfromEE"));
+    Serial.println(F(" [13] SHUTDOWN logger"));
     }
     Serial.println(); Serial.flush();
 }   //terminates startMenu_printMenuOptions
@@ -2205,10 +2207,14 @@ void error_shutdown() {
   
   // SLEEP ANY CONNECTED SENSORS before you disable I2C
 
-  //shut down RTC alarms
+  //shut down RTC alarm
+    RTC_DS3231_setA1Time(0,0,61,0,0b00001100,0,0,0);  // DISABLES AL1 by setting to an INVALID TIME that can never be reached: 61 for minutes
+                                                      // 0b00001100 = A1 Alarm when minutes AND seconds match, ignores days, hours
+    LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF); // give the RTC memory register some WRITING time 
+  
     Wire.beginTransmission(DS3231_ADDRESS);
     Wire.write(DS3231_STATUS_REG);
-    Wire.write(0);    // clearing the entire status register turns Off (both) RTC alarms though technically only the last two bits need to be set
+    Wire.write(0);                                    // clearing the entire status register turns Off (both) RTC alarms though technically only the last two bits need to be set
     Wire.endTransmission();
     noInterrupts ();
     bitSet(EIFR,INTF0);                               // clear flag for interrupt 0  see: https://gammon.com.au/interrupts
