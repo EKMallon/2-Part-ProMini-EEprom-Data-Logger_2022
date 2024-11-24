@@ -27,16 +27,21 @@ These 'powers of 2' fit in the I2C buffer AND divide evenly into the EEproms har
 #define logRTC_Temperature                // 1-byte: the RTC's internal 0.25°C resolution temperature sensor
 //#define logCurrentBattery                 // 2-byte: RARELY USED - not 1byte compressed like LowestBattery, primarily included as a powers-of-2 balancing option
 
-#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+//#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
 //#define readLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                             // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
 //#define readSi7051_Temperature            // 2-bytes: often used for NTC calibration - does not require a library, functions for si7051 at end of program
 
 //#define readBh1750_LUX                    // 2-bytes: raw sensor output: gets converted to Lux during download
 
-//#define readBMP_Temperature               // 2-bytes
-//#define readBMP_Pressure                  // 2-bytes
-//#define recordBMPaltitude                 // 2-bytes: calculated by library
+// IF you enable all three BME  or BMP outputs, you will need two more bytes for an 8-byte record: try adding logLowestBattery & logRTC_Temperature 
+//#define readBMP280_Temperature               // 2-bytes
+//#define readBMP280_Pressure                  // 2-bytes
+//#define recordBMP280_Altitude                 // 2-bytes: calculated by library
+
+//#define recordBMEtemp_2byteInt            // 2-byte NOTE: works with BMP & BME
+//#define recordBMEpressure_2byteInt        // 2-byte NOTE: works with BMP & BME
+//#define recordBMEhumidity_2byteInt        // 2-byte ONLY if BME 280 connected!
 
 //#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - Generates noise on rails, requires 1000uF rail capacitor!-
 
@@ -144,12 +149,12 @@ volatile boolean d3_INT1_Flag = false;
 
 #ifdef readNTC_D6refD7ntc 
 //------------------
-  uint32_t NTC_NewReading;                  // max of 65535 limits our ability to measure 10kNTC at temps below zero C!
+  uint16_t NTC_NewReading;                  // max of 65535 limits our ability to measure 10kNTC at temps below zero C!
 #endif
 
 #ifdef readLDR_onD9 
 //------------------
-  uint32_t LDR_NewReading;                  // 65535 limit
+  uint16_t LDR_NewReading;                  // 65535 limit
 #endif
 #if defined(readNTC_D6refD7ntc) || defined(readLDR_onD9)
 //------------------------------------------------
@@ -166,12 +171,27 @@ volatile boolean d3_INT1_Flag = false;
   #define Bh1750_Address 0x23
 #endif
 
-#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude)
+#if defined(readBMP280_Temperature) || defined(readBMP280_Pressure) || defined(recordBMP280_Altitude)
 //-----------------------------------------------------------------------------------
   #include <BMP280_DEV.h>                   // Include the BMP280_DEV.h library  // NOTE: this library has disappeared from github?
   BMP280_DEV bmp280;                        // Instantiate (create) a BMP280_DEV object and set-up for I2C operation
   #define BMP280_Address 0x76
   float Bmp280_Temp_degC, Bmp280_Pr_mBar, Bmp280_altitude_m;  // Variables for sensor output
+#endif
+
+#if defined(recordBMEtemp_2byteInt) || defined(recordBMEpressure_2byteInt) || defined(recordBMEhumidity_2byteInt)
+//-----------------------------------------------------------------------------------
+  #include <forcedBMX280.h>  // install this through the library manager in the IDE
+  // from https://github.com/soylentOrange/Forced-BMX280/blob/master/examples/BME280_full_example/BME280_full_example.ino
+  // ctrl_meas - see datasheet section 5.4.5 // forced mode: ctrl_meas[0..1] 0b01 (0b11 for normal and 0b00 for sleep mode)
+  // pressure oversampling x 1: ctrl_meas[4..2] 0b001
+  // temperature oversampling x 1: ctrl_meas[7..5] 0b001
+  // humidity does not have oversampling
+  
+  ForcedBME280 climateSensor = ForcedBME280();
+  int32_t g_temperature;  // current temperature with 2 decimal places embedded in the integer
+  uint32_t g_pressure;    // current pressure           "
+  uint32_t g_humidity;    // current humidity           "
 #endif
 
 #ifdef readSi7051_Temperature 
@@ -236,13 +256,23 @@ void setup () {
     sensorBytesPerRecord = sensorBytesPerRecord + 2;           // two-byte integer for RAW reading before conversion to lux
   #endif
   
-  #ifdef readBMP_Temperature
+  #ifdef readBMP280_Temperature
     sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
   #endif
-  #ifdef readBMP_Pressure
+  #ifdef readBMP280_Pressure
     sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
   #endif
-  #ifdef recordBMPaltitude
+  #ifdef recordBMP280_Altitude
+    sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
+  #endif
+
+  #ifdef recordBMEtemp_2byteInt
+    sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
+  #endif
+  #ifdef recordBMEpressure_2byteInt
+    sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
+  #endif
+  #ifdef recordBMEhumidity_2byteInt
     sensorBytesPerRecord = sensorBytesPerRecord + 2;            // two-byte integer 
   #endif
   
@@ -320,7 +350,7 @@ void setup () {
 
   //DS3231 does not have any non-volatile memory so all of the internal registers reset to default if power is lost - so we store this in the 328p eeprom
   RTCagingOffset = EEPROM.read(10);                             // int8_t can store from -127 to +128
-      if((RTCagingOffset<-100) || (RTCagingOffset>100)){        // if value stored in eeprom is outside normal operating parameters
+      if((RTCagingOffset<-128) || (RTCagingOffset>127)){        // if value stored in eeprom is outside normal operating parameters
         RTCagingOffset=0;                                       // then resets it to the 0 default 
         EEPROM.update(10,0);                                    // and store that default back in the eeprom
         }
@@ -454,7 +484,7 @@ Serial.print(F("Initializing sensors: "));Serial.flush();
 
 // BMP280 initialization
 //-----------------------
-#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude)
+#if defined(readBMP280_Temperature) || defined(readBMP280_Pressure) || defined(recordBMP280_Altitude)
   bmp280.begin(BMP280_Address);                             // or bmp280.begin(BMP280_I2C_ALT_ADDR); for sensors at 0x76
       //Options are OVERSAMPLING_SKIP, _X1, _X2, _X4, _X8, _X16 // pg 15 datasheet One millibar = 100 Pa
   bmp280.setPresOversampling(OVERSAMPLING_X4);
@@ -478,6 +508,21 @@ Serial.print(F("Initializing sensors: "));Serial.flush();
   Serial.print(F("BMP280 started,"));Serial.flush();
 
 #endif // terminates BMP280 init.
+
+// BME280 initialization
+//-----------------------
+#if defined(recordBMEtemp_2byteInt) || defined(recordBMEpressure_2byteInt) || defined(recordBMEhumidity_2byteInt)
+  // NOTE this library defaults to lowest resoulution to save power
+  // the NOISE depends on the oversampling and, for pressure and temperature on the filter setting used 
+  // noise in temp at x1 oversampling: 0.005 deg C at 25C  [see chapter 3.6]
+  // noise in pressure at x1 oversampling: 3.3mbar @x1 but 1.3mbar at x16 at 25C
+  // IIR filtering can't be used with one-shot because it requires you to take multiple readings in succession
+  
+  while (climateSensor.begin()) {Serial.println(F("Waiting for sensor..."));delay(1000);}
+  Serial.print("BmE280 ID:0x");
+  Serial.print(climateSensor.getChipID(), HEX);
+  Serial.println();Serial.flush(); 
+#endif // terminates BME280 init.
 
 #ifdef readSi7051_Temperature
 //--------------------
@@ -789,29 +834,52 @@ toggleBlueAndGreenLEDs();
 
 // read bmp280 sensor
 //-------------------
-#if defined(readBMP_Temperature) || defined(readBMP_Pressure) || defined(recordBMPaltitude) //  '||' means 'OR'
+#if defined(readBMP280_Temperature) || defined(readBMP280_Pressure) || defined(recordBMP280_Altitude) //  '||' means 'OR'
   bmp280.startForcedConversion(); 
   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF); //NOTE: sleep time needed here depends on your oversampling settings
   if(ECHO_TO_SERIAL){ Serial.println();}
   #endif
 
-#ifdef readBMP_Temperature
+#ifdef readBMP280_Temperature
   bmp280.getCurrentTemperature(Bmp280_Temp_degC);
   LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
   if(ECHO_TO_SERIAL){ Serial.print(F(", b280 Temp: ")); Serial.print(Bmp280_Temp_degC,2); Serial.print(F(" °C")); }
 #endif
 
-#ifdef readBMP_Pressure
+#ifdef readBMP280_Pressure
   bmp280.getCurrentPressure(Bmp280_Pr_mBar);
   LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
   if(ECHO_TO_SERIAL){ Serial.print(F(", b280 Pr. "));Serial.print(Bmp280_Pr_mBar,2); Serial.print(F(" hPa")); }
 #endif
 
-#ifdef recordBMPaltitude
+#ifdef recordBMP280_Altitude
   bmp280.getCurrentAltitude(Bmp280_altitude_m);
-    if(ECHO_TO_SERIAL){ Serial.print(F(", b280 Alt. ")); Serial.print(Bmp280_altitude_m,2); Serial.print(F(" m,")); }
+  if(ECHO_TO_SERIAL){ Serial.print(F(", b280 Alt. ")); Serial.print(Bmp280_altitude_m,2); Serial.print(F(" m,")); }
 #endif
 // to read all three at the same time: bmp280.getCurrentMeasurements(Bmp280_Temp_degC, Bmp280_Pr_mBar, Bmp280_altitude_m); //function returns 1 if readings OK
+#if defined(readBMP280_Temperature) || defined(readBMP280_Pressure) || defined(recordBMP280_Altitude) //  '||' means 'OR'
+  if(ECHO_TO_SERIAL){ Serial.flush();}
+#endif
+
+// read BME280 sensor
+//-------------------
+#if defined(recordBMEtemp_2byteInt) || defined(recordBMEpressure_2byteInt) || defined(recordBMEhumidity_2byteInt)
+   climateSensor.takeForcedMeasurement();
+   LowPower.powerDown(SLEEP_30MS, ADC_OFF, BOD_OFF);//At lowest resoluton this should be plenty of time 
+   #if defined(recordBMEtemp_2byteInt)
+    g_temperature = climateSensor.getTemperatureCelsius();
+    if(ECHO_TO_SERIAL){Serial.print(F(" BmeT: "));Serial.print(g_temperature/100);Serial.print(F("."));Serial.print(g_temperature%100);Serial.print(F("°C"));}
+   #endif
+   #if defined(recordBMEpressure_2byteInt)
+    g_pressure = climateSensor.getPressure();
+    if(ECHO_TO_SERIAL){Serial.print(F(" BmePr: "));Serial.print(g_pressure/100);Serial.print(F("."));Serial.print(g_pressure%100);Serial.print(F("hPa"));}
+   #endif
+   #if defined(recordBMEhumidity_2byteInt)
+    g_humidity = climateSensor.getRelativeHumidity();
+    if(ECHO_TO_SERIAL){Serial.print(F(" BmeRh: "));Serial.print(g_humidity/100);Serial.print(F("."));Serial.print(g_humidity%100);Serial.print(F("%"));}
+   #endif
+    if(ECHO_TO_SERIAL){Serial.println();Serial.flush();}
+#endif
 
 #ifdef readSi7051_Temperature
 //------------------------------------------------------------------------------
@@ -954,7 +1022,7 @@ turnOffAllindicatorLEDs();
         Wire.write(hiByte);  
 #endif // #ifdef readBh1750_LUX
 
-#ifdef readBMP_Temperature
+#ifdef readBMP280_Temperature
   Bmp280_Temp_degC = Bmp280_Temp_degC*100.00;   //convert float reading to integer preserving two decimal places
   int16_Buffer = (int16_t)Bmp280_Temp_degC;  
   loByte = lowByte(int16_Buffer);              // first byte of record gets checked by 
@@ -964,7 +1032,7 @@ turnOffAllindicatorLEDs();
         Wire.write(hiByte);  
 #endif
 
-#ifdef readBMP_Pressure
+#ifdef readBMP280_Pressure
   Bmp280_Pr_mBar = Bmp280_Pr_mBar*10.0;         //convert float reading to integer preserving ONE decimal place
   int16_Buffer = (int16_t)Bmp280_Pr_mBar;  
   loByte = lowByte(int16_Buffer);              // first byte of record gets checked by 
@@ -974,7 +1042,7 @@ turnOffAllindicatorLEDs();
         Wire.write(hiByte);     
 #endif
 
-#ifdef recordBMPaltitude
+#ifdef recordBMP280_Altitude
   Bmp280_altitude_m = Bmp280_altitude_m*100.00;     //convert float reading to integer preserving two decimal places
     int16_Buffer = (int16_t)Bmp280_altitude_m;   // Note: *100 overuns the int at higher altitudes - switch to *10
   loByte = lowByte(int16_Buffer);              // first byte of record gets checked by 
@@ -983,6 +1051,37 @@ turnOffAllindicatorLEDs();
   hiByte = highByte(int16_Buffer);
         Wire.write(hiByte);  
 #endif
+
+#ifdef recordBMEtemp_2byteInt       // stored in int32_t g_temperature with 2 decimals 'embedded' in the integer
+//---------------------------
+  int16_Buffer = g_temperature;     // room in int16 to ±32,000 so no danger of overflow
+  loByte = lowByte(int16_Buffer); 
+  if(loByte<1){loByte=1;} // low byte first for zero trapping on sensor readings - this can introduce error on lowest bit
+      Wire.write(loByte);
+  hiByte = highByte(int16_Buffer);
+      Wire.write(hiByte);
+#endif
+
+#ifdef recordBMEpressure_2byteInt       // stored in int32_t g_pressure with 2 decimals 'embedded' in the integer
+//-------------------------------
+  uint16_Buffer = g_pressure - 80000;  // -80000 for SCALING to fit into uint16 with two preserved decimal places
+  loByte = lowByte(uint16_Buffer); 
+  if(loByte<1){loByte=1;} // low byte first for zero trapping on sensor readings - this can introduce error on lowest bit
+      Wire.write(loByte);
+  hiByte = highByte(uint16_Buffer);
+      Wire.write(hiByte);
+#endif
+
+#ifdef recordBMEhumidity_2byteInt       // stored in int32_t g_humidity with 3 decimals 'embedded' in the integer
+//-------------------------------
+  uint16_Buffer = g_humidity;
+  loByte = lowByte(uint16_Buffer); 
+  if(loByte<1){loByte=1;} // low byte first for zero trapping on sensor readings - this can introduce error on lowest bit
+      Wire.write(loByte);
+  hiByte = highByte(uint16_Buffer);
+      Wire.write(hiByte);
+#endif
+
 
 #ifdef logCurrentBattery                      // stores the 'raw' 16-byte integer using two bytes (ie with no compression)
 //-----------------------------------------------------------------------------------------------------------------------
@@ -1360,7 +1459,7 @@ void setup_displayStartMenu() {
     uint8_t inByte=0;
     boolean wait4input = true;
     boolean displayMenuAgain = true;
-    uint32_Buffer = millis();                          //Beginning of time-out period must be unsigned long variable
+    uint32_t startMenuStart = millis();                          //Beginning of time-out period must be unsigned long variable
 
   do{ inByte=0;
     if (displayMenuAgain) { 
@@ -1410,7 +1509,7 @@ void setup_displayStartMenu() {
             case 13: 
               error_shutdown();                             // leaving the RTC oscilator running
             default:                                        // Check milliseconds elapsed & send logger into shutdown if we've waited too long
-                if ((millis() - uint32_Buffer) > 480000) {  // start menu has an 480000 = 8 minute timeout
+                if ((millis() - startMenuStart) > 480000) {  // start menu has an 480000 = 8 minute timeout
                 Serial.println(F("Start Menu Timed out with NO commands!"));
                 Serial.println(F("Logger shutting down...")); Serial.flush(); error_shutdown(); 
                 }
@@ -1503,15 +1602,24 @@ void startMenu_listEnabledSensors(){
   #ifdef readBh1750_LUX
         Serial.print(F("Bh1750[Lux],"));
         #endif
-  #ifdef readBMP_Temperature
+  #ifdef readBMP280_Temperature
         Serial.print(F("b280[T°C],"));
       #endif
-  #ifdef readBMP_Pressure
+  #ifdef readBMP280_Pressure
         Serial.print(F("b280Pr[mbar],"));
         #endif
-  #ifdef recordBMPaltitude
+  #ifdef recordBMP280_Altitude
         Serial.print(F("b280Alt[m],"));
         #endif
+  #ifdef recordBMEtemp_2byteInt
+        Serial.print(F("[°C]bmE,"));
+        #endif
+  #ifdef recordBMEpressure_2byteInt
+        Serial.print(F("[mbar]bmE,"));
+        #endif
+  #ifdef recordBMEhumidity_2byteInt
+        Serial.print(F("[%rh]bmE,"));
+        #endif 
   #ifdef logCurrentBattery
         Serial.print(F("C.Bat[mv],"));
         #endif
@@ -1523,11 +1631,11 @@ void startMenu_listEnabledSensors(){
 void startMenu_setRTCageOffset(){                           //default = 0 
 //-----------------------------------------------------------------------------------------
 do {
-    Serial.println(F("Input a new RTC aging Offset between -99 and +99:"));
+    Serial.println(F("Input a new RTC aging Offset between -128 and +127:"));
     Serial.setTimeout(100000);                              // parseInt will normally “time out” after default set point is 1 second (1000 milliseconds).
     while (Serial.available() != 0 ) {Serial.read();}       // clears the serial buffer  
     RTCagingOffset = Serial.parseInt();          //parseInt() actually returns a long
-     } while((RTCagingOffset<-100) || (RTCagingOffset>100));  // if condition fails & you have to re-enter the number
+     } while((RTCagingOffset<-128) || (RTCagingOffset>127));  // if condition fails & you have to re-enter the number
 
    // dont need to convert twos complement? because int8_t ALREADY IS??
    EEPROM.put(10,RTCagingOffset); // every time you run the logger it will retrieve this and load it into the RTC 
@@ -1757,7 +1865,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
 #endif
 
 
-#ifdef readBMP_Temperature           // Bmp280_Temp_degC, 2-bytes, low byte first
+#ifdef readBMP280_Temperature           // Bmp280_Temp_degC, 2-bytes, low byte first
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //low byte
       EEmemPointer++;
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //hi byte
@@ -1767,7 +1875,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(floatBuffer,2);Serial.print(",");
 #endif
 
-#ifdef readBMP_Pressure      // Bmp280_Pr_mBar, 2-bytes, low byte first
+#ifdef readBMP280_Pressure      // Bmp280_Pr_mBar, 2-bytes, low byte first
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //low byte
       EEmemPointer++;
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //hi byte
@@ -1777,7 +1885,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(floatBuffer,1);Serial.print(",");
 #endif
 
-#ifdef recordBMPaltitude            // Bmp280_Temp_degC, 2-bytes, low byte first
+#ifdef recordBMP280_Altitude            // Bmp280_Temp_degC, 2-bytes, low byte first
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //low byte
       EEmemPointer++;
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer); //hi byte
@@ -1786,7 +1894,38 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       floatBuffer  = (float)(int16_Buffer)/100.0;  //Note: *100 over runs the integer at higher altitudes, in that case switch to *10
       Serial.print(floatBuffer,1);Serial.print(",");
 #endif
-      
+
+#ifdef recordBMEtemp_2byteInt  // Bme280_Temp_degC, 2-bytes
+      loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      int16_Buffer = (int16_t)((hiByte << 8) | loByte);
+      floatBuffer  = (float)(int16_Buffer)/100.0;  // two decimal places were embedded in the original integer
+      Serial.print(floatBuffer,2);Serial.print(",");
+#endif
+
+#ifdef recordBMEpressure_2byteInt // Bme280_Pr_mBar stored as two bytes
+      loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      uint16_Buffer = (uint16_t)((hiByte << 8) | loByte);
+      uint32_Buffer = uint16_Buffer + 80000;  // remvoe the -80000 scaling we did before storing the pressure with the embedded 2 decimal places
+      floatBuffer  = (float)(uint32_Buffer) /100.0; // two decimal places were embedded in the original integer
+      Serial.print(floatBuffer,2);Serial.print(",");
+#endif
+
+#ifdef recordBMEhumidity_2byteInt // originally uint32_t g_humidity but we truncated to 2-bytes
+      loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
+      EEmemPointer++;
+      uint16_Buffer = (uint16_t)((hiByte << 8) | loByte);
+      floatBuffer  = (float)(uint16_Buffer) /100.0; // two decimal places were embedded in the original integer
+      Serial.print(floatBuffer,2);Serial.print(",");
+#endif
+
 #ifdef logCurrentBattery            // stored as two data bytes in the Main Loop, with lowByte first, then highByte
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);
       EEmemPointer++;             
