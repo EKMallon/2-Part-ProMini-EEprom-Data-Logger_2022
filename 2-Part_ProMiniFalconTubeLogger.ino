@@ -48,7 +48,7 @@ The following sensors require library installations before they can be used:
 //#define logCurrentBattery_2byte           // 2-byte: RARELY USED - not 1byte compressed like LowestBattery, primarily included as a powers-of-2 balancing option
 //#define logFreeVariableMemory_2byte       // RARELY USED - primarily included as a powers-of-2 rule balancing option that does not rely on any external sensors to be present
 
-#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+//#define readNTC_D6refD7ntc                // 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
 //#define readLDR_onD9                      // 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                             // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
 //#define readSi7051_Temperature            // 2-bytes: often used for NTC calibration - does not require a library, functions for si7051 at end of program
@@ -63,9 +63,9 @@ The following sensors require library installations before they can be used:
 //#define readBMP280_Pressure               // 2-bytes
 //#define recordBMP280_Altitude             // 2-bytes: calculated by library
 
-#define recordBMEtemp_2byteInt            // 2-byte NOTE: works with both BMP & BME 280
-#define recordBMEpressure_2byteInt        // 2-byte NOTE: works with both BMP & BME 280
-#define recordBMEhumidity_2byteInt        // 2-byte ONLY if BME 280 connected!
+//#define recordBMEtemp_2byteInt            // 2-byte NOTE: works with both BMP & BME 280
+//#define recordBMEpressure_2byteInt        // 2-byte NOTE: works with both BMP & BME 280
+//#define recordBMEhumidity_2byteInt        // 2-byte ONLY if BME 280 connected!
 
 //#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - Generates noise on rails, requires 1000uF rail capacitor!-
 
@@ -1269,9 +1269,9 @@ turnOffAllindicatorLEDs();
 
 #ifdef logFreeVariableMemory_2byte             // stores the 'raw' 16-byte integer using two bytes (ie with no compression)
 //-----------------------------------------------------------------------------------------------------------------------
-  loByte = lowByte(CurrentBattery);
+  loByte = lowByte(freeVariableMemory);
         Wire.write(loByte);              
-  hiByte = highByte(CurrentBattery);
+  hiByte = highByte(freeVariableMemory);
         Wire.write(hiByte);  
 #endif //logFreeVariableMemory_2byte
 
