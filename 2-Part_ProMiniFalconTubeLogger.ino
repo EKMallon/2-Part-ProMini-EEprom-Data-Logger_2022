@@ -89,9 +89,9 @@ Note: we still have upper 512 bytes of 328p 1k eeprom availible for OLED screen 
 //#define readBMP280_Pressure_2byte               // 2-bytes
 //#define recordBMP280_Altitude_2byte             // 2-bytes: calculated by library
 
-#define recordBMEtemp_2byteInt            // 2-byte NOTE: works with both BMP & BME 280
-#define recordBMEpressure_2byteInt        // 2-byte NOTE: works with both BMP & BME 280
-#define recordBMEhumidity_2byteInt        // 2-byte ONLY if BME 280 connected!
+//#define recordBMEtemp_2byteInt            // 2-byte NOTE: works with both BMP & BME 280
+//#define recordBMEpressure_2byteInt        // 2-byte NOTE: works with both BMP & BME 280
+//#define recordBMEhumidity_2byteInt        // 2-byte ONLY if BME 280 connected!
 
 //#define OLED_64x32_SSD1306                // not a sensor, but enabled with define to include needed library - Generates noise on rails, requires 1000uF rail capacitor!-
 
@@ -3250,3 +3250,4 @@ void sendMultiAscii2serial(uint8_t repeats,uint8_t asciiCode){
       Serial.write(asciiCode);
       }
   }
+
