@@ -48,4 +48,4 @@ The data download function in setup retrieves those separate bytes and concatena
 ---
 
 Note: This script will still run on the older 3-module "Modules & Jumper Wires"  loggers described in the original Sensors paper: http://www.mdpi.com/1424-8220/18/2/530 
-and provides a 'no SD card' operation on the older 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/ but you will have to change the LED pins.
+and provides a 'no SD card' operation on the older 2020 classroom logger described at https://thecavepearlproject.org/2020/10/22/pro-mini-classroom-datalogger-2020-update/ but you will have to change the LED pins. Sensor support and STARTUP MENU OPTIONS WILL CHANGE as the code evolves over time.
