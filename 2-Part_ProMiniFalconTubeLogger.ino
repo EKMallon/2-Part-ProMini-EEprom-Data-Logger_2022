@@ -75,11 +75,10 @@ Note: we still have upper 512 bytes of 328p 1k eeprom availible for OLED screen 
 //#define readBMP280_Pressure_2byte        // 2-bytes  // you will need two more bytes for an 8-byte record: try adding logLowestBattery_1byte & logRTC_Temperature_1byte 
 //#define recordBMP280_Altitude_2byte      // 2-bytes: calculated by library
 
-//Thermistor & Light Dependant Resistor
-//#define readD7resistorwD8pullup_2byte    // NTC // 2-bytes:ohms // for explanation of the method for reading analog resistance with digital pins see
-//#define readD6ResistorwD8pullup_2byte    // LDR // 2-bytes:ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
-                                           // these have to match the connections shown in the build: https://thecavepearlproject.org/2023/12/01/the-e360-a-classroom-data-logger-for-science/
-//Light/Lux sensor:
+//#define readD7resistorwD6ref_2byte       // NTC? 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
+//#define readD9resistorwD6ref_2byte       // LDR? 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
+                                           // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
+ //Light/Lux sensor:
 //#define readBh1750_LUX_2byte             // 2-bytes: NOTE: raw sensor output gets converted to Lux during download
 
 //Infrared Motion sensor:                  // AM312 typically adds 10-15uA to sleep current
@@ -3290,3 +3289,4 @@ void sendMultiAscii2serial(uint8_t repeats,uint8_t asciiCode){
       Serial.write(asciiCode);
       }
   }
+
