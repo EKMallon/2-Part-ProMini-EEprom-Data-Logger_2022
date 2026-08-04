@@ -1330,6 +1330,7 @@ turnOffAllindicatorLEDs();
  
     // ignore the first ADC reading & take another:
     bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC)); uint16_Buffer = ADC;
+    ADMUX = default_ADMUX; ADCSRA = default_ADCSRA;     // restore ADC control registers defaults - some - e360s will not sleep without this!
     ADCSRA = 0; power_adc_disable();
 
 // -------------------------------------------------------------------------------
