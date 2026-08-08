@@ -1,4 +1,3 @@
-
 // 2-Part logger code by Edward Mallon - modified 2023 for e360 course at Northwestern University
 // https://thecavepearlproject.org/2022/03/09/powering-a-promini-logger-for-one-year-on-a-coin-cell/
 /*
@@ -75,22 +74,15 @@ Note: we still have upper 512 bytes of 328p 1k eeprom availible for OLED screen 
 //#define readBMP280_Pressure_2byte        // 2-bytes  // you will need two more bytes for an 8-byte record: try adding logLowestBattery_1byte & logRTC_Temperature_1byte 
 //#define recordBMP280_Altitude_2byte      // 2-bytes: calculated by library
 
+
 //#define readD7resistorwD6ref_2byte       // NTC? 2-bytes: ohms // for explanation of the method for reading analog resistance with digital pins see
 //#define readD9resistorwD6ref_2byte       // LDR? 2-bytes: ohms // https://thecavepearlproject.org/2019/03/25/using-arduinos-input-capture-unit-for-high-resolution-sensor-readings/
                                            // 2022 note: 10k refference resistor on D6, NTC on D7, 300Ω on D8, LDR on D9 - does not match newer 2023 e360 NTC connections
- //Light/Lux sensor:
+                                         
+//Light/Lux sensor:
 //#define readBh1750_LUX_2byte             // 2-bytes: NOTE: raw sensor output gets converted to Lux during download
 
-//Infrared Motion sensor:                  // AM312 typically adds 10-15uA to sleep current
-//#define PIRcountPerInterval_2byte  // 2-bytes:  PIR is just another interrupt generating sensor, saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersReadings_4byte - choose one or the other
-
-//#define PIRtriggersReadings_4byte          // 4-bytes for Unix Timestamp saved every pass: Do not enable this with PIRcountPerInterval_2byte - choose one or the other
-// DOES NOT use the regular RTC-alarm based sampling interval but instead records the seconds elapsed between EVERY PIR trigger event in a uint32_t long variable [uint16_t would overflow at ~18 hours]
-// PIRtriggersReadings_4byte usually enabled with four other bytes of sensor data [for a total of 8 bytes per record] OR with another 12 bytes of sensor data for a total of 16 bytes per record.
-// WARNING this can use alot of memory very quickly if PIR is triggered frequently! - recommend use with larger eeprom memory attached
-
-
-//#define logCurrentBattery_2byte          // RARELY USED - not 1byte compressed like LowestBattery, primarily included as a powers-of-2 balancing option
+#define logCurrentBattery_2byte          // RARELY USED - not 1byte compressed like LowestBattery, primarily included as a powers-of-2 balancing option
 //#define logFreeVariableMemory_2byte      // RARELY USED - primarily included as a powers-of-2 rule balancing option that does not rely on any external sensors
 
 //#define readSi7051_Temp_2byte            // 2-bytes: used for NTC calibration - does not require a library, functions for si7051 at end of program
@@ -98,9 +90,32 @@ Note: we still have upper 512 bytes of 328p 1k eeprom availible for OLED screen 
 //#define readSht3x_Temp_2byte             // 2-bytes
 //#define readSht3x_Humidity_2byte         // 2-bytes
 
-//#define recordBMEtemp_2byteInt           // 2-byte NOTE: works with both BMP & BME
-//#define recordBMEpressure_2byteInt       // 2-byte NOTE: works with both BMP & BME
+#define recordBMEtemp_2byteInt           // 2-byte NOTE: works with both BMP & BME
+#define recordBMEpressure_2byteInt       // 2-byte NOTE: works with both BMP & BME
 //#define recordBMEhumidity_2byteInt       // 2-byte ONLY if BME 280 connected!
+
+// AM312 Infrared Motion sensor:           // typically adds 10-15uA to sleep current //PIR drives its output line HIGH when it detects motion
+//#define PIRcountPerInterval_2byte        // 2-bytes:  PIR is just an interrupt generating sensor, saves # of PIR HIGH events in a specified sample interval. Do not enable this with PIRtriggersReadings_4byte - choose one or the other
+//#define PIRtriggersReadings_4byte        // 4-bytes for full Unix Timestamp every pass: Do not enable this with PIRcountPerInterval_2byte - choose one or the other
+// PIR readme:
+// PIRtriggers DOES NOT use the regular RTC-alarm based sampling interval but instead records the seconds elapsed between EVERY PIR trigger event in a uint32_t long variable [NOTE uint16_t overflows if no triggers within ~18 hours so change variable if you want longer intervals]
+// PIRtriggersReadings_4byte usually enabled with four other bytes of sensor data [for a total of 8 bytes per record] OR with another 12 bytes of sensor data for a total of 16 bytes per record.
+// AM312 has a hold time of about 2.0-2.3 sec and a blocking (cooldown) time of about 2 seconds, sensor STAYS HIGH indefinately if a new triggers occur when it is already high
+// WARNING this can use alot of memory very quickly if PIR is triggered frequently!  - recommend use with larger eeprom memory attached
+
+// TTP223 Capacitive Touch Switch:        // can be configured with jumpers for simmilar behavior to the AM312 - although the PIR has much longer (2s) signal HOLD-UP time
+//#define TTP223countPerInterval_2byte    // 2-bytes: TTP223 is another interrupt generating sensor, saves #of Touch switch HIGH events in the start menu specified sample interval. Do not enable this WITH TTP233 triggersReadings_4byte - choose one mode  or the other
+//#define TTP223triggersReadings_4byte    // Do not enable this with TTP223countPerInterval_2byte - choose ONE OR THE OTHER: saves 4-bytes Unix Timestamp every record so uses memory quickly
+// TTP223 readme:                         // Like the PIR, TTP223triggers DOES NOT use the regular RTC-alarm sampling interval
+// "Momentary" is typically the default for these modules with BOTH A AND B terminals left OPEN. For config info see: https://diyusthad.com/2019/06/how-to-use-ttp223-based-touch-switch.html
+// With A&B open the output signal changes from (LOW) to state (HIGH) when a touch is detected and should return to (LOW) state when released
+// SECURE THE TOUCH sensor WITH DROPS OF HOT GLUE on the side to avoid shaking the fragile breadboard connections!
+// ALSO: trim down the header pins poking above the sensor surface board and cover them with conformal - if your finger touches the metal pins the touch will not register
+// It may help to solder a small bypass cap directly onto the sensor module to stabilize power connections
+// SLOW SENSOR RESPONSE TIME: ~220ms at VDD = 3V, Power-On Stabilization takes 0.5 seconds - Do not touch the pad during startup.
+// The TTP223/TTP233 performs periodic auto-calibration. If environmental capacitance shifts during touch, the internal timer recalibrates the baseline after roughly 4 seconds.
+// TTP233s do this after EVERY touch. If your finger is on the pad during the recalibration it may cause weird behavior or invert the response!
+// Capactive sensors are sensitive to nearby interference: see https://forum.arduino.cc/t/ttp223-touch-sensors-self-triggering-bug/414967
 
 //#define OLED_64x32_SSD1306               // not a sensor, but enabled with define to include needed library - requires 1000uF rail cap to smooth noise from 1306 charge pump!
 
@@ -113,8 +128,8 @@ Note: we still have upper 512 bytes of 328p 1k eeprom availible for OLED screen 
 //#define totalBytesOfStorage 32768           // Default: 0x57 / 4096bytes to use the 4k eeprom on the RTC module 
 
 // the Red LED on D13 gets used if BOTH of the following LED #define statements are commented out
-//#define LED_r9_b10_g11_gnd12               // enables code for RGB indicator LED // expects a 1k limit resistor on shared GND!
-#define LED_GndGB_A0_A2                  // For 2022 2-module build with NO breadboards: red channel leg on led cut, A0gnd Green A1, blue A2, default Red on d13 left in place
+#define LED_r9_b10_g11_gnd12               // enables code for RGB indicator LED // expects a 1k limit resistor on shared GND!
+//#define LED_GndGB_A0_A2                  // For 2022 2-module build with NO breadboards: red channel leg on led cut, A0gnd Green A1, blue A2, default Red on d13 left in place
 
 #include <Wire.h>       // I2C bus coms library: RTC, EEprom & Sensors
 #include <EEPROM.h>     // note: requires default promini bootloader (ie NOT optiboot)
@@ -143,8 +158,8 @@ bool displayMoreOptions = false;              // Flag toggle between Setup and R
 const char compileDate[] PROGMEM = __DATE__;  //  built-in function in C++ makes text string: Jun 29 2023
 const char compileTime[] PROGMEM = __TIME__;  //  built-in function in C++ makes text string: 10:04:18
 
-#define EEpromI2Caddr 0x57                    // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
-#define totalBytesOfStorage 4096        // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
+#define EEpromI2Caddr 0x50                    // Run a bus scan to check where your eeproms are https://github.com/RobTillaart/MultiSpeedI2CScanner
+#define totalBytesOfStorage 32768        // Default: 0x57 / 4096 bytes for 4k // 32k Module: 0x50 & 32768 
 // 32k I2C EEprom Module: use 0x50 & 32768    // for 64k eeprom (soldered on top of 4k) usually at 0x50 & 65536 with no address pins pulled high
 uint8_t sensorBytesPerRecord = 0;             // INCREMENTED at the beginning of setup to match #defined sensors. MUST divide evenly into EEprom Page buffer AND fit inside I2C buffer
 uint32_t EEmemPointer = 0;                   // counter that advances through the EEprom memory locations by sensorBytesPerRecord at each pass through the main loop
@@ -200,13 +215,13 @@ uint8_t hiByte,loByte;                        // for splitting 16-byte integers 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++   
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-#if defined(PIRcountPerInterval_2byte) || defined(PIRtriggersReadings_4byte)
-uint16_t d3_INT1_eventCounter = 0;
-volatile boolean d3_INT1_Flag = false; 
+#if defined(PIRcountPerInterval_2byte) || defined(PIRtriggersReadings_4byte) || defined(TTP223countPerInterval_2byte) || defined(TTP223triggersReadings_4byte)
+uint16_t d3_INT1_eventCounter = 0;      // only saved with countPerInterval defines
+volatile boolean d3_INT1_Flag = false;  // needed for dual interrupt combinations
 #endif
 
-#ifdef PIRtriggersReadings_4byte
-//--------------------------------
+#if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
+//----------------------------------------------------------------------------
 uint32_t currentPIRtriggerTime;      // not saved, but calculated for specific lab activities
 uint32_t previousPIRtriggerTime;     // not saved, but calculated for specific lab activities
 uint32_t d3_INT1_elapsedSeconds = 0; // not saved, but calculated for specific lab activities
@@ -320,11 +335,11 @@ void setup () {
     sensorBytesPerRecord = sensorBytesPerRecord + 1;            // NOW INDEX-compressed to 1-Byte of eeprom storage
   #endif
 
-  #ifdef PIRcountPerInterval_2byte
+  #if defined(PIRcountPerInterval_2byte) || defined(TTP223countPerInterval_2byte)
     sensorBytesPerRecord = sensorBytesPerRecord + 2;            //  two-byte integer counts Rising of output channel of PIR sensor
   #endif
-
-  #ifdef PIRtriggersReadings_4byte
+  
+  #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
     sensorBytesPerRecord = sensorBytesPerRecord + 4;            //  4-byte integer: d3_INT1_elapsedSeconds
   #endif
   
@@ -419,7 +434,7 @@ void setup () {
   ADMUX = (0 << REFS1) | (1 << REFS0) | (0 << ADLAR) | (1 << MUX3) | (1 << MUX2) | (1 << MUX1) | (0 << MUX0); // from https://provideyourown.com/2012/secret-arduino-voltmeter-measure-battery-voltage/
   set_ADMUX_2readRailVoltage = ADMUX;               // store modified ADMUX register values in a variable for use in readRailVoltage()
 
-  ADMUX = default_ADMUX;                            //restore the default
+  ADMUX = default_ADMUX; ADCSRA = default_ADCSRA;   //restore the default
   ADCSRA = 0; power_adc_disable();                  //turn off the ADC to save power At 3V @ 25°C, the ADC consumes ~87µA
   
 
@@ -744,7 +759,7 @@ RTC_DS3231_getTime();                     // populates the global variables t_da
   uint32_Buffer += 946684800;               // this will be the unixtime when we wake AFTER the sync delay is over // add # seconds from 1970 to 2000 = delta between Unixtime start & our RTC's internal start time
   EEPROM.put(0,uint32_Buffer);              // store loggerStartTime so it can be used reconstructing each records timestamp in the startMenu_sendData2Serial() later during download
 
-  #ifdef PIRtriggersReadings_4byte
+  #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
     previousPIRtriggerTime = uint32_Buffer;
   #endif
 
@@ -778,7 +793,7 @@ RTC_DS3231_getTime();                     // populates the global variables t_da
 //terminates synchronization time delay -we are now ready to start logging!
 //------------------------------------------------------------------------------------------------------------
 
-  #ifdef PIRtriggersReadings_4byte
+  #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
     // PIRtriggers is a special case were we don't want any RTC alarms to occur
     // so we set the alarm register to a time that can not happen
     // PIRtriggers also skips the normal Alarm set procedure at the begining of the main loop
@@ -831,10 +846,12 @@ turnOffAllindicatorLEDs();  // draws about 50uA per LED channel with internal pu
 //-------------------------------------------------------------------------------    
   RTC_DS3231_getTime();                     // populates global t_minute,t_second variables
 
-#ifdef PIRtriggersReadings_4byte
+#if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
+
   currentPIRtriggerTime = RTC_DS3231_unixtime();  // special case where we preload a variable for a delta calculation
   d3_INT1_elapsedSeconds = currentPIRtriggerTime - previousPIRtriggerTime;
   previousPIRtriggerTime = currentPIRtriggerTime;
+
 #else
     
   if (SampleIntervalSeconds > 0){           // then our alarm is in (SampleInterval) seconds
@@ -864,23 +881,23 @@ turnOffAllindicatorLEDs();  // draws about 50uA per LED channel with internal pu
     // however this only needs to be done once in setup and alarm 1 will always fire, so we don't need to call it here again!
     // All we need do in sleepNwait is clear the stat register A2F,A1F flags 
 
-#endif //terminates #ifdef PIRtriggersReadings_4byte    
+#endif //terminates #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)    
  
   if(ECHO_TO_SERIAL){
       Serial.println();Serial.println();
-        #ifdef PIRtriggersReadings_4byte
-          Serial.print(F(">PIR wakeup #")); Serial.print(d3_INT1_eventCounter);Serial.print(F(": "));
+        #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
+          Serial.print(F(">D3 interrupt wake#")); Serial.print(d3_INT1_eventCounter);Serial.print(F(": "));
         #else
           Serial.print(F(">Wake: "));
         #endif
       Serial.print(t_year,DEC);Serial.print(F("/"));Serial.print(t_month,DEC);Serial.print(F("/"));Serial.print(t_day,DEC);
       Serial.print(F(" "));Serial.print(t_hour,DEC);Serial.print(F(":"));Serial.print(t_minute,DEC);Serial.print(F(":"));Serial.print(t_second,DEC);
 
-        #ifndef PIRtriggersReadings_4byte
+        #if !defined(PIRtriggersReadings_4byte) && !defined(TTP223triggersReadings_4byte)
           Serial.print(F(" Next Alarm Set in: "));
           if (SampleIntervalSeconds > 0){ Serial.print(SampleIntervalSeconds); Serial.print(F("sec")); 
           }else{ Serial.print(SampleIntervalMinutes);Serial.print(F("min")); }
-        #endif //#ifndef PIRtriggersReadings_4byte
+        #endif
       Serial.println();Serial.flush();
     }
  
@@ -1062,6 +1079,9 @@ turnOffAllindicatorLEDs();  // draws about 50uA per LED channel with internal pu
 #ifdef PIRcountPerInterval_2byte
     if(ECHO_TO_SERIAL){ Serial.print(F(" ,PIR total:")); Serial.print(d3_INT1_eventCounter);Serial.flush();}
 #endif
+#ifdef TTP223countPerInterval_2byte
+    if(ECHO_TO_SERIAL){ Serial.print(F(" ,TTP233 total:")); Serial.print(d3_INT1_eventCounter);Serial.flush();}
+#endif
 //-----------------------------------------------------
 // Sensor readings finished: turn off the indicator LED 
 //-----------------------------------------------------
@@ -1127,7 +1147,7 @@ turnOffAllindicatorLEDs();
 // ALSO NOTE we are using 3x 0xFF as our END OF FILE marker to stop the download (Erased eeproms typically have all bits set to 1)
 // So we must implement various 'traps' to prevent 3 successive 0xFF's from being saved in the data
 
-#ifdef PIRtriggersReadings_4byte  
+#if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)  
   uint32_Buffer = RTC_DS3231_unixtime(); // must call this function AFTER calling RTC_DS3231_getTime to updates the global t_ variables
   
   // how to slice a 4-byte LONG uint32_t into individual bytes:  & 0b11111111 extracts only the lowest eight bits
@@ -1168,7 +1188,7 @@ turnOffAllindicatorLEDs();
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // Note: better overflow catching could be added here - but leaving as a student exercise
 
-#ifdef PIRcountPerInterval_2byte
+#if defined(PIRcountPerInterval_2byte) || defined(TTP223countPerInterval_2byte)
   d3_INT1_eventCounter = d3_INT1_eventCounter+1;       // we 'add one' so that the 1st stored byte is never zero - even when the count actually is zero- this is our zero trap
   loByte = lowByte(d3_INT1_eventCounter);
     Wire.write(loByte);
@@ -1330,7 +1350,7 @@ turnOffAllindicatorLEDs();
  
     // ignore the first ADC reading & take another:
     bitSet(ADCSRA,ADSC); while(bit_is_set(ADCSRA,ADSC)); uint16_Buffer = ADC;
-    ADMUX = default_ADMUX; ADCSRA = default_ADCSRA;     // restore ADC control registers defaults - some - e360s will not sleep without this!
+    ADMUX = default_ADMUX; ADCSRA = default_ADCSRA;
     ADCSRA = 0; power_adc_disable();
 
 // -------------------------------------------------------------------------------
@@ -1504,36 +1524,50 @@ if(totalBytesOfStorage>4096){
       error_shutdown();                                 // shutdown down the logger
       }
 
-#ifdef PIRcountPerInterval_2byte                  // Logger can be woken by D2 AND D3 interrupt events
-    rtc_INT0_Flag = false;                              // clear the flag we use to indicate the RTC alarm occurred
-    do{                                                 // this do-while locks the processor into a 'counting loop' until the RTC alarm happens.
-        sleepNwait4D3InterruptORrtcAlarm();             // counter gets incremented in sleepNwait4D3Interrupt() function //Logger can be woken by D2 AND D3 interrupt events
-        if(ECHO_TO_SERIAL){ Serial.println();Serial.println(F(" PIR:")); Serial.print(d3_INT1_eventCounter);Serial.flush();}
-      }while (rtc_INT0_Flag == false);                  // if RTC alarm fires Flag becomes true in the ISR & we break out of the PIR do-while counting loop
-      
+// NOTE: nesting here is somewhat complex with the different D3 interrupt response modes:
+
+#if defined(PIRcountPerInterval_2byte) || defined(TTP223countPerInterval_2byte) 
+    // This is a 'processor trapping loop' for interrupt counting that is independant of the main loop! // Logger can be woken from this trap by D2 AND D3 interrupt events
+
+    rtc_INT0_Flag = false; // clear the flag we use to indicate the RTC alarm occurred before entering the 'counting trap'
+
+    do{ // this do-while locks the processor into a 'D3 counting loop' until the RTC alarm happens and its flag is set true
+
+      if(ECHO_TO_SERIAL && rtc_INT0_Flag==false && d3_INT1_eventCounter>0) {Serial.println();Serial.print(F(" D3int#")); Serial.print(d3_INT1_eventCounter);Serial.flush();}
+
+      // AM312 PIR has a HOLD-UP time of ~2 seconds and a blocking (cooldown) time of about 2 seconds before it can trigger again
+      // proceed to sleepNwait only AFTER the sensor has reset to LOW, NOTE: PIR stays HIGH if new trigger happens before reset
+      #if defined(PIRcountPerInterval_2byte) 
+        noInterrupts();bitSet(EIFR,INTF1); //pinMode(3,INPUT);
+        attachInterrupt(1,input_d3_interrupt_ISR,LOW); interrupts(); turnOnGreenLED();
+        while(digitalRead(3) == HIGH) { LowPower.powerDown(SLEEP_500MS, ADC_OFF, BOD_OFF);}
+        noInterrupts();detachInterrupt(1);bitSet(EIFR,INTF1);interrupts(); turnOffAllindicatorLEDs();
+        LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);  // 15ms settling time for the interrupt line capacitance
+      #endif  //defined(PIRcountPerInterval_2byte)
+    
+      sleepNwait4D3InterruptORrtcAlarm();             // d3_INT1_eventCounter gets incremented inside the sleepNwait4D3Interrupt() function
+
+    }while (rtc_INT0_Flag == false);                  // if RTC alarm fires Flag becomes true in the ISR & we break out of the PIR do-while counting loop
+
 #else
     
-    #ifdef PIRtriggersReadings_4byte
-    
-    // -----------------------------------OPTIONAL-----------------------------
-    // Processor waits here with the led lit if the PIR sensor is still sending 'HIGH' signal 
-    // - so we can tell if the sensor is being constantly triggered -
-     if (digitalRead(3) == HIGH) {              // PIR sensor drives the output pin HIGH when it is detecting motion
-        turnOnGreenLED();
-          noInterrupts();
-            bitSet(EIFR,INTF1);                 // clears the previous int flag inside 328p processor
-            attachInterrupt(1,input_d3_interrupt_ISR,LOW);    // Make the processor wait here until the PIR resets
-          interrupts ();
-        LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-     }  // Once the PIR has reset LOW we enter our normal sleep state
-   // -----------------------------------OPTIONAL-----------------------------
-   
-        sleepNwait4D3InterruptORrtcAlarm();            // Logger wakes ONLY by PIR driven D3 interrupt - because alarm was disabled at end of setup
+      #if defined(PIRtriggersReadings_4byte)
+        noInterrupts();pinMode(3,INPUT);bitSet(EIFR,INTF1);
+        attachInterrupt(1,input_d3_interrupt_ISR,LOW);
+        interrupts(); turnOnGreenLED();
+        while(digitalRead(3) == HIGH) {LowPower.powerDown(SLEEP_500MS, ADC_OFF, BOD_OFF);}
+        noInterrupts();detachInterrupt(1);bitSet(EIFR,INTF1);interrupts();turnOffAllindicatorLEDs(); 
+        LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);  // 15ms settling time for the interrupt line capacitance
+      #endif
+
+  #if defined(PIRtriggersReadings_4byte) || defined(TTP223triggersReadings_4byte)
+          sleepNwait4D3InterruptORrtcAlarm();  // in this case the logger wakes ONLY by D3 interrupt going HIGH - because RTC alarm was disabled in setup
     #else
-        sleepNwait4RTCalarm(); // NORMAL RTC-only sleepNwait with no D3 interrupt-event-counters
-    #endif
+          sleepNwait4RTCalarm();      // NORMAL RTC-only sleepNwait with no D3 interrupt-event-counters
+  #endif
     
-#endif  //PIRcountPerInterval_2byte
+#endif //terminates #if defined(PIRcountPerInterval_2byte) || defined(TTP223countPerInterval_2byte)
+
 
 //==========================================================================================
 //==========================================================================================
@@ -1581,7 +1615,8 @@ void rtc_d2_alarm_ISR() {                             // this function gets call
   detachInterrupt(0);                                 // detaching inside the ISR itself makes sure it only triggers ONE time
 }
 
-#if defined(PIRcountPerInterval_2byte) || defined(PIRtriggersReadings_4byte)
+#if defined(PIRcountPerInterval_2byte) || defined(PIRtriggersReadings_4byte) || defined(TTP223countPerInterval_2byte) || defined(TTP223triggersReadings_4byte)
+
 void sleepNwait4D3InterruptORrtcAlarm(){
   // we need to use two flag variables to keep track of which interrupt woke the logger
   // detachInterrupt(X); gets done inside the ISRx for each interrupt which also sets that flag true
@@ -1600,6 +1635,9 @@ void sleepNwait4D3InterruptORrtcAlarm(){
 
   bitSet(EIFR,INTF1);                      // clear int1 flag
   attachInterrupt(1,input_d3_interrupt_ISR,RISING);   //PIR drives its output line HIGH when it detects motion
+  // PIR drives its output line HIGH when it detects motion
+  // TTP223 Touch Switch is the same when both A and B terminals should be in open position
+  // But TTP223 behavior can INVERT if accidentally touched during self-calibration
   
   interrupts ();
   
@@ -1638,7 +1676,7 @@ void input_d3_interrupt_ISR() {
   d3_INT1_Flag = true;
   detachInterrupt(1);
 }
-#endif  //#if defined(PIRcountPerInterval_2byte)
+#endif  //terminates #if defined(PIRcountPerInterval_2byte) || defined(PIRtriggersReadings_4byte) || defined(TTP223countPerInterval_2byte) || defined(TTP223triggersReadings_4byte)
 
 //==========================================================================================
 //  *  *  *  *  *  *  *  *  *  FUNCTIONS called during Setup()  *  *  *  *  *  *  *  *  *  * 
@@ -1846,10 +1884,10 @@ void startMenu_listEnabledSensors(){
         Serial.print(F("RTC[°C], "));
         #endif
   #ifdef PIRcountPerInterval_2byte
-        Serial.print(F("PIR count, "));
+        Serial.print(F("PIR#, "));
         #endif
-  #ifdef PIRtriggersReadings_4byte
-        Serial.print(F("PIR Triggers Reading, "));
+  #ifdef TTP223countPerInterval_2byte
+        Serial.print(F("TTP233#, "));
         #endif
   #if defined(readD7ResistorwD6ref_2byte) || defined(readD7resistorwD8pullup_2byte)
         Serial.print(F("D7[Ω], "));   //e360 & 2part
@@ -1895,7 +1933,13 @@ void startMenu_listEnabledSensors(){
         #endif
   #ifdef readSi7051_Temp_2byte
         Serial.print(F("SI7051[°C], "));
-        #endif 
+        #endif
+  #ifdef PIRtriggersReadings_4byte
+        Serial.print(F("PIRtrigger = Variable Runtime!"));
+        #endif
+  #ifdef TTP223triggersReadings_4byte
+        Serial.print(F("TTP223trigger = Variable Runtime!"));
+        #endif  
   }
 
 void startMenu_setRTCageOffset(){                           //default = 0 
@@ -2218,7 +2262,7 @@ if (!convertDataFlag){    // then output raw bytes exactly as read from eeprom [
       Serial.print(floatBuffer,2);Serial.print(F(","));     // only print two decimal places
 #endif  //#ifdef logRTC_Temperature_1byte 
 
-#ifdef PIRcountPerInterval_2byte
+#if defined(PIRcountPerInterval_2byte) || defined(TTP223countPerInterval_2byte)
       loByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);EEmemPointer++;             
       hiByte = i2c_eeprom_read_byte(EEpromI2Caddr,EEmemPointer);EEmemPointer++;                   
       uint16_Buffer = (uint16_t)((hiByte << 8) | loByte); 
@@ -2566,7 +2610,7 @@ uint16_t readRailVoltage(){                             // reads 1.1vref as inpu
 
   bitClear(ADCSRA,ADIE);                                // turn off the ADC interrupts
   bitSet(ACSR,ADIF);                                    // clears any ADC interrupt flags in the processor
-  ADMUX = default_ADMUX; //restores default A3 channel? // but we can skip this unless ADC used elsewhere
+  ADMUX = default_ADMUX; ADCSRA = default_ADCSRA;       // restores default A3 channel
   ADCSRA = 0; power_adc_disable();                      // turn off ADC
 
   uint16_t railvoltage = InternalReferenceConstant / (uint16_Buffer>>2); // convert average ADC reading into railvoltage in mV // bitshift >>2 same as divide by 4
@@ -3290,4 +3334,3 @@ void sendMultiAscii2serial(uint8_t repeats,uint8_t asciiCode){
       Serial.write(asciiCode);
       }
   }
-
